@@ -1,0 +1,51 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/helper/ValidationException.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">helper</a>/ValidationException.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.helper;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ Validation exceptions, as thrown by the methods in {@link Validate}.
+ */
+public class ValidationException extends IllegalArgumentException {
+
+<span id="H0">    public static final String Validator = Validate.class.getName();</span>
+
+    public ValidationException(String msg) {
+<span id="H0">        super(msg);</span>
+<span id="H0">    }</span>
+
+    @Override
+    public synchronized Throwable fillInStackTrace() {
+        // Filters out the Validate class from the stacktrace, to more clearly point at the root-cause.
+
+<span id="H0">        super.fillInStackTrace();</span>
+
+<span id="H0">        StackTraceElement[] stackTrace = getStackTrace();</span>
+<span id="H0">        List&lt;StackTraceElement&gt; filteredTrace = new ArrayList&lt;&gt;();</span>
+<span id="H0">        for (StackTraceElement trace : stackTrace) {</span>
+<span id="H0">            if (trace.getClassName().equals(Validator)) continue;</span>
+<span id="H0">            filteredTrace.add(trace);</span>
+        }
+
+<span id="H0">        setStackTrace(filteredTrace.toArray(new StackTraceElement[0]));</span>
+
+<span id="H0">        return this;</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

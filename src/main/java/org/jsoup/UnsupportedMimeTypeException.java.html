@@ -1,0 +1,47 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/UnsupportedMimeTypeException.java</title>
+<link rel="stylesheet" href="../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../index.html">src</a>/<a href="../../../index.html">main</a>/<a href="../../index.html">java</a>/<a href="../index.html">org</a>/<a href="index.html">jsoup</a>/UnsupportedMimeTypeException.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup;
+
+import java.io.IOException;
+
+/**
+ * Signals that a HTTP response returned a mime type that is not supported.
+ */
+public class UnsupportedMimeTypeException extends IOException {
+    private final String mimeType;
+    private final String url;
+
+    public UnsupportedMimeTypeException(String message, String mimeType, String url) {
+<span id="H2">        super(message);</span>
+<span id="H2">        this.mimeType = mimeType;</span>
+<span id="H2">        this.url = url;</span>
+<span id="H2">    }</span>
+
+    public String getMimeType() {
+        return mimeType;
+    }
+
+    public String getUrl() {
+        return url;
+    }
+
+    @Override
+    public String toString() {
+        return super.toString() + &quot;. Mimetype=&quot; + mimeType + &quot;, URL=&quot;+url;
+    }
+}</pre>
+</div>
+<script src="../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

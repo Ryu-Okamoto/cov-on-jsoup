@@ -1,0 +1,65 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/SerializationException.java</title>
+<link rel="stylesheet" href="../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../index.html">src</a>/<a href="../../../index.html">main</a>/<a href="../../index.html">java</a>/<a href="../index.html">org</a>/<a href="index.html">jsoup</a>/SerializationException.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup;
+
+/**
+ * A SerializationException is raised whenever serialization of a DOM element fails. This exception usually wraps an
+ * {@link java.io.IOException} that may be thrown due to an inaccessible output stream.
+ */
+public final class SerializationException extends RuntimeException {
+	/**
+	 * Creates and initializes a new serialization exception with no error message and cause.
+	 */
+	public SerializationException() {
+		super();
+	}
+
+	/**
+	 * Creates and initializes a new serialization exception with the given error message and no cause.
+	 * 
+	 * @param message
+	 *            the error message of the new serialization exception (may be &lt;code&gt;null&lt;/code&gt;).
+	 */
+	public SerializationException(String message) {
+		super(message);
+	}
+
+	/**
+	 * Creates and initializes a new serialization exception with the specified cause and an error message of
+     * &lt;code&gt;(cause==null ? null : cause.toString())&lt;/code&gt; (which typically contains the class and error message of
+     * &lt;code&gt;cause&lt;/code&gt;).
+	 * 
+	 * @param cause
+	 *            the cause of the new serialization exception (may be &lt;code&gt;null&lt;/code&gt;).
+	 */
+	public SerializationException(Throwable cause) {
+		super(cause);
+	}
+
+	/**
+	 * Creates and initializes a new serialization exception with the given error message and cause.
+	 * 
+	 * @param message
+	 *            the error message of the new serialization exception.
+	 * @param cause
+	 *            the cause of the new serialization exception.
+	 */
+	public SerializationException(String message, Throwable cause) {
+		super(message, cause);
+	}
+}</pre>
+</div>
+<script src="../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

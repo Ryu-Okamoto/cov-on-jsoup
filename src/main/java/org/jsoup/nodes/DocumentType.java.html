@@ -1,0 +1,126 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/nodes/DocumentType.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">nodes</a>/DocumentType.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.nodes;
+
+import org.jsoup.internal.StringUtil;
+import org.jsoup.helper.Validate;
+import org.jsoup.nodes.Document.OutputSettings.Syntax;
+
+import java.io.IOException;
+
+/**
+ * A {@code &lt;!DOCTYPE&gt;} node.
+ */
+public class DocumentType extends LeafNode {
+    // todo needs a bit of a chunky cleanup. this level of detail isn&#x27;t needed
+    public static final String PUBLIC_KEY = &quot;PUBLIC&quot;;
+    public static final String SYSTEM_KEY = &quot;SYSTEM&quot;;
+    private static final String NAME = &quot;name&quot;;
+    private static final String PUB_SYS_KEY = &quot;pubSysKey&quot;; // PUBLIC or SYSTEM
+    private static final String PUBLIC_ID = &quot;publicId&quot;;
+    private static final String SYSTEM_ID = &quot;systemId&quot;;
+    // todo: quirk mode from publicId and systemId
+
+    /**
+     * Create a new doctype element.
+     * @param name the doctype&#x27;s name
+     * @param publicId the doctype&#x27;s public ID
+     * @param systemId the doctype&#x27;s system ID
+     */
+<span id="H1">    public DocumentType(String name, String publicId, String systemId) {</span>
+<span id="H1">        Validate.notNull(name);</span>
+<span id="H1">        Validate.notNull(publicId);</span>
+<span id="H1">        Validate.notNull(systemId);</span>
+<span id="H1">        attr(NAME, name);</span>
+<span id="H1">        attr(PUBLIC_ID, publicId);</span>
+<span id="H1">        attr(SYSTEM_ID, systemId);</span>
+<span id="H1">        updatePubSyskey();</span>
+<span id="H1">    }</span>
+
+    public void setPubSysKey(String value) {
+<span id="H2">        if (value != null)</span>
+<span id="H2">            attr(PUB_SYS_KEY, value);</span>
+<span id="H2">    }</span>
+
+    private void updatePubSyskey() {
+<span id="H1">        if (has(PUBLIC_ID)) {</span>
+<span id="H2">            attr(PUB_SYS_KEY, PUBLIC_KEY);</span>
+<span id="H1">        } else if (has(SYSTEM_ID))</span>
+<span id="H2">            attr(PUB_SYS_KEY, SYSTEM_KEY);</span>
+<span id="H1">    }</span>
+
+    /**
+     * Get this doctype&#x27;s name (when set, or empty string)
+     * @return doctype name
+     */
+    public String name() {
+<span id="H2">        return attr(NAME);</span>
+    }
+
+    /**
+     * Get this doctype&#x27;s Public ID (when set, or empty string)
+     * @return doctype Public ID
+     */
+    public String publicId() {
+<span id="H2">        return attr(PUBLIC_ID);</span>
+    }
+
+    /**
+     * Get this doctype&#x27;s System ID (when set, or empty string)
+     * @return doctype System ID
+     */
+    public String systemId() {
+<span id="H2">        return attr(SYSTEM_ID);</span>
+    }
+
+    @Override
+    public String nodeName() {
+<span id="H1">        return &quot;#doctype&quot;;</span>
+    }
+
+    @Override
+    void outerHtmlHead(Appendable accum, int depth, Document.OutputSettings out) throws IOException {
+        // add a newline if the doctype has a preceding node (which must be a comment)
+<span id="H2">        if (siblingIndex &gt; 0 &amp;&amp; out.prettyPrint())</span>
+<span id="H2">            accum.append(&#x27;\n&#x27;);</span>
+
+<span id="H2">        if (out.syntax() == Syntax.html &amp;&amp; !has(PUBLIC_ID) &amp;&amp; !has(SYSTEM_ID)) {</span>
+            // looks like a html5 doctype, go lowercase for aesthetics
+<span id="H2">            accum.append(&quot;&lt;!doctype&quot;);</span>
+        } else {
+<span id="H2">            accum.append(&quot;&lt;!DOCTYPE&quot;);</span>
+        }
+<span id="H2">        if (has(NAME))</span>
+<span id="H2">            accum.append(&quot; &quot;).append(attr(NAME));</span>
+<span id="H2">        if (has(PUB_SYS_KEY))</span>
+<span id="H2">            accum.append(&quot; &quot;).append(attr(PUB_SYS_KEY));</span>
+<span id="H2">        if (has(PUBLIC_ID))</span>
+<span id="H2">            accum.append(&quot; \&quot;&quot;).append(attr(PUBLIC_ID)).append(&#x27;&quot;&#x27;);</span>
+<span id="H2">        if (has(SYSTEM_ID))</span>
+<span id="H2">            accum.append(&quot; \&quot;&quot;).append(attr(SYSTEM_ID)).append(&#x27;&quot;&#x27;);</span>
+<span id="H2">        accum.append(&#x27;&gt;&#x27;);</span>
+<span id="H2">    }</span>
+
+    @Override
+    void outerHtmlTail(Appendable accum, int depth, Document.OutputSettings out) {
+<span id="H2">    }</span>
+
+    private boolean has(final String attribute) {
+<span id="H1">        return !StringUtil.isBlank(attr(attribute));</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

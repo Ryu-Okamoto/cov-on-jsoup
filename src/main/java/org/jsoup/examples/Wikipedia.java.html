@@ -1,0 +1,44 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/examples/Wikipedia.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">examples</a>/Wikipedia.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.examples;
+
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
+
+import java.io.IOException;
+
+/**
+ * A simple example, used on the jsoup website.
+ */
+public class Wikipedia {
+    public static void main(String[] args) throws IOException {
+        Document doc = Jsoup.connect(&quot;http://en.wikipedia.org/&quot;).get();
+        log(doc.title());
+
+        Elements newsHeadlines = doc.select(&quot;#mp-itn b a&quot;);
+        for (Element headline : newsHeadlines) {
+            log(&quot;%s\n\t%s&quot;, headline.attr(&quot;title&quot;), headline.absUrl(&quot;href&quot;));
+        }
+    }
+
+    private static void log(String msg, String... vals) {
+        System.out.println(String.format(msg, vals));
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

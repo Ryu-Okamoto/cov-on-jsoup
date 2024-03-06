@@ -1,0 +1,105 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/parser/ParseSettings.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">parser</a>/ParseSettings.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.parser;
+
+import org.jsoup.nodes.Attributes;
+import org.jspecify.annotations.Nullable;
+
+import static org.jsoup.internal.Normalizer.lowerCase;
+
+/**
+ * Controls parser case settings, to optionally preserve tag and/or attribute name case.
+ */
+public class ParseSettings {
+    /**
+     * HTML default settings: both tag and attribute names are lower-cased during parsing.
+     */
+    public static final ParseSettings htmlDefault;
+    /**
+     * Preserve both tag and attribute case.
+     */
+    public static final ParseSettings preserveCase;
+
+    static {
+<span id="H0">        htmlDefault = new ParseSettings(false, false);</span>
+<span id="H0">        preserveCase = new ParseSettings(true, true);</span>
+<span id="H0">    }</span>
+
+    private final boolean preserveTagCase;
+    private final boolean preserveAttributeCase;
+
+    /**
+     * Returns true if preserving tag name case.
+     */
+    public boolean preserveTagCase() {
+<span id="H0">        return preserveTagCase;</span>
+    }
+
+    /**
+     * Returns true if preserving attribute case.
+     */
+    public boolean preserveAttributeCase() {
+<span id="H1">        return preserveAttributeCase;</span>
+    }
+
+    /**
+     * Define parse settings.
+     * @param tag preserve tag case?
+     * @param attribute preserve attribute name case?
+     */
+<span id="H0">    public ParseSettings(boolean tag, boolean attribute) {</span>
+<span id="H0">        preserveTagCase = tag;</span>
+<span id="H0">        preserveAttributeCase = attribute;</span>
+<span id="H0">    }</span>
+
+    ParseSettings(ParseSettings copy) {
+<span id="H2">        this(copy.preserveTagCase, copy.preserveAttributeCase);</span>
+<span id="H2">    }</span>
+
+    /**
+     * Normalizes a tag name according to the case preservation setting.
+     */
+    public String normalizeTag(String name) {
+<span id="H0">        name = name.trim();</span>
+<span id="H0">        if (!preserveTagCase)</span>
+<span id="H0">            name = lowerCase(name);</span>
+<span id="H0">        return name;</span>
+    }
+
+    /**
+     * Normalizes an attribute according to the case preservation setting.
+     */
+    public String normalizeAttribute(String name) {
+<span id="H1">        name = name.trim();</span>
+<span id="H1">        if (!preserveAttributeCase)</span>
+<span id="H1">            name = lowerCase(name);</span>
+<span id="H1">        return name;</span>
+    }
+
+    @Nullable Attributes normalizeAttributes(@Nullable Attributes attributes) {
+<span id="H1">        if (attributes != null &amp;&amp; !preserveAttributeCase) {</span>
+<span id="H1">            attributes.normalize();</span>
+        }
+<span id="H1">        return attributes;</span>
+    }
+
+    /** Returns the normal name that a Tag will have (trimmed and lower-cased) */
+    static String normalName(String name) {
+<span id="H1">        return lowerCase(name.trim());</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

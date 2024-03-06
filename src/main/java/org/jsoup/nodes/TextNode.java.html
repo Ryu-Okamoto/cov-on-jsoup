@@ -1,0 +1,168 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/nodes/TextNode.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">nodes</a>/TextNode.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.nodes;
+
+import org.jsoup.helper.Validate;
+import org.jsoup.internal.StringUtil;
+
+import java.io.IOException;
+
+/**
+ A text node.
+
+ @author Jonathan Hedley, jonathan@hedley.net */
+public class TextNode extends LeafNode {
+    /**
+     Create a new TextNode representing the supplied (unencoded) text).
+
+     @param text raw text
+     @see #createFromEncoded(String)
+     */
+<span id="H1">    public TextNode(String text) {</span>
+<span id="H1">        value = text;</span>
+<span id="H1">    }</span>
+
+	public String nodeName() {
+<span id="H1">        return &quot;#text&quot;;</span>
+    }
+    
+    /**
+     * Get the text content of this text node.
+     * @return Unencoded, normalised text.
+     * @see TextNode#getWholeText()
+     */
+    public String text() {
+<span id="H1">        return StringUtil.normaliseWhitespace(getWholeText());</span>
+    }
+    
+    /**
+     * Set the text content of this text node.
+     * @param text unencoded text
+     * @return this, for chaining
+     */
+    public TextNode text(String text) {
+<span id="H1">        coreValue(text);</span>
+<span id="H1">        return this;</span>
+    }
+
+    /**
+     Get the (unencoded) text of this text node, including any newlines and spaces present in the original.
+     @return text
+     */
+    public String getWholeText() {
+<span id="H1">        return coreValue();</span>
+    }
+
+    /**
+     Test if this text node is blank -- that is, empty or only whitespace (including newlines).
+     @return true if this document is empty or only whitespace, false if it contains any text content.
+     */
+    public boolean isBlank() {
+<span id="H2">        return StringUtil.isBlank(coreValue());</span>
+    }
+
+    /**
+     * Split this text node into two nodes at the specified string offset. After splitting, this node will contain the
+     * original text up to the offset, and will have a new text node sibling containing the text after the offset.
+     * @param offset string offset point to split node at.
+     * @return the newly created text node containing the text after the offset.
+     */
+    public TextNode splitText(int offset) {
+<span id="H2">        final String text = coreValue();</span>
+<span id="H2">        Validate.isTrue(offset &gt;= 0, &quot;Split offset must be not be negative&quot;);</span>
+<span id="H2">        Validate.isTrue(offset &lt; text.length(), &quot;Split offset must not be greater than current text length&quot;);</span>
+
+<span id="H2">        String head = text.substring(0, offset);</span>
+<span id="H2">        String tail = text.substring(offset);</span>
+<span id="H2">        text(head);</span>
+<span id="H2">        TextNode tailNode = new TextNode(tail);</span>
+<span id="H2">        if (parentNode != null)</span>
+<span id="H2">            parentNode.addChildren(siblingIndex()+1, tailNode);</span>
+
+<span id="H2">        return tailNode;</span>
+    }
+
+    @Override
+    void outerHtmlHead(Appendable accum, int depth, Document.OutputSettings out) throws IOException {
+<span id="H1">        final boolean prettyPrint = out.prettyPrint();</span>
+<span id="H1">        final Element parent = parentNode instanceof Element ? ((Element) parentNode) : null;</span>
+<span id="H1">        final boolean normaliseWhite = prettyPrint &amp;&amp; !Element.preserveWhitespace(parentNode);</span>
+<span id="H1">        final boolean trimLikeBlock = parent != null &amp;&amp; (parent.tag().isBlock() || parent.tag().formatAsBlock());</span>
+<span id="H1">        boolean trimLeading = false, trimTrailing = false;</span>
+
+<span id="H1">        if (normaliseWhite) {</span>
+<span id="H2">            trimLeading = (trimLikeBlock &amp;&amp; siblingIndex == 0) || parentNode instanceof Document;</span>
+<span id="H2">            trimTrailing = trimLikeBlock &amp;&amp; nextSibling() == null;</span>
+
+            // if this text is just whitespace, and the next node will cause an indent, skip this text:
+<span id="H2">            Node next = nextSibling();</span>
+<span id="H2">            Node prev = previousSibling();</span>
+<span id="H2">            boolean isBlank = isBlank();</span>
+<span id="H2">            boolean couldSkip = (next instanceof Element &amp;&amp; ((Element) next).shouldIndent(out)) // next will indent</span>
+<span id="H2">                || (next instanceof TextNode &amp;&amp; (((TextNode) next).isBlank())) // next is blank text, from re-parenting</span>
+<span id="H2">                || (prev instanceof Element &amp;&amp; (((Element) prev).isBlock() || prev.isNode(&quot;br&quot;))) // br is a bit special - make sure we don&#x27;t get a dangling blank line, but not a block otherwise wraps in head</span>
+                ;
+<span id="H2">            if (couldSkip &amp;&amp; isBlank) return;</span>
+
+<span id="H2">            if (</span>
+<span id="H2">                (siblingIndex == 0 &amp;&amp; parent != null &amp;&amp; parent.tag().formatAsBlock() &amp;&amp; !isBlank) ||</span>
+<span id="H2">                (out.outline() &amp;&amp; siblingNodes().size() &gt; 0 &amp;&amp; !isBlank) ||</span>
+<span id="H2">                (siblingIndex &gt; 0 &amp;&amp; isNode(prev, &quot;br&quot;)) // special case wrap on inline &lt;br&gt; - doesn&#x27;t make sense as a block tag</span>
+            )
+<span id="H2">                indent(accum, depth, out);</span>
+        }
+
+<span id="H1">        Entities.escape(accum, coreValue(), out, false, normaliseWhite, trimLeading, trimTrailing);</span>
+<span id="H1">    }</span>
+
+    @Override
+    void outerHtmlTail(Appendable accum, int depth, Document.OutputSettings out) throws IOException {}
+
+    @Override
+    public String toString() {
+<span id="H2">        return outerHtml();</span>
+    }
+
+    @Override
+    public TextNode clone() {
+<span id="H1">        return (TextNode) super.clone();</span>
+    }
+
+    /**
+     * Create a new TextNode from HTML encoded (aka escaped) data.
+     * @param encodedText Text containing encoded HTML (e.g. {@code &amp;lt;})
+     * @return TextNode containing unencoded data (e.g. {@code &lt;})
+     */
+    public static TextNode createFromEncoded(String encodedText) {
+<span id="H1">        String text = Entities.unescape(encodedText);</span>
+<span id="H1">        return new TextNode(text);</span>
+    }
+
+    static String normaliseWhitespace(String text) {
+<span id="H1">        text = StringUtil.normaliseWhitespace(text);</span>
+<span id="H1">        return text;</span>
+    }
+
+    static String stripLeadingWhitespace(String text) {
+<span id="H0">        return text.replaceFirst(&quot;^\\s+&quot;, &quot;&quot;);</span>
+    }
+
+    static boolean lastCharIsWhitespace(StringBuilder sb) {
+<span id="H1">        return sb.length() != 0 &amp;&amp; sb.charAt(sb.length() - 1) == &#x27; &#x27;;</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

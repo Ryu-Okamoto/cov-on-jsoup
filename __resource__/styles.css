@@ -1,0 +1,95 @@
+
+body {
+    display: block;
+}
+
+.viewer {
+    display: flex;
+    border: 1px solid #ddd;
+    width: 100%;
+}
+
+.source-code {
+    margin: 0;
+    padding: 10px;
+    width: 100%;
+    overflow-x: scroll;
+}
+
+.line-numbers {
+    color: gray;
+    text-align: right;
+    padding-left: 10px;
+    padding-right: 5px;
+    border-right: 1px solid #ddd;
+}
+
+li {
+    list-style-type: none;
+    display: flex;
+}
+
+.file {
+    padding-left: 1.2em;
+    background-image: url(file.svg);
+    background-repeat: no-repeat;
+    background-size: 1em;
+    background-position: left center;
+}
+
+.folder {
+    padding-left: 1.2em;
+    background-image: url(folder.svg);
+    background-repeat: no-repeat;
+    background-size: 1em;
+    background-position: left center;
+}
+
+.filename-container {
+    width: 45%;
+    overflow-x: scroll;
+    white-space: nowrap;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+.filename-container::-webkit-scrollbar{
+    display:none;
+}
+
+.ratio-bar-container {
+    width: 45%;
+    margin: 0 0 0 auto;
+    padding: 0;
+    border: 1px solid #ddd;
+}
+
+.ratio-bar {
+    height: 100%;
+    display: inline-block;
+}
+
+#comment {
+    color: darkgreen;
+}
+
+pre > #keyword, #H0 > #keyword, #H1 > #keyword, #H2 > #keyword, #H3 > #keyword, #H4 > #keyword, #H5 > #keyword {
+    color: darkviolet;
+}
+#H0{
+    background-color: #fdede4
+}
+#H1{
+    background-color: #f8c5ac
+}
+#H2{
+    background-color: #f29b76
+}
+#H3{
+    background-color: #ed6d46
+}
+#H4{
+    background-color: #e83820
+}
+#H5{
+    background-color: #d7000f
+}

@@ -1,0 +1,107 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/helper/CookieUtil.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">helper</a>/CookieUtil.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.helper;
+
+import org.jsoup.Connection;
+import org.jsoup.internal.StringUtil;
+
+import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ Helper functions to support the Cookie Manager / Cookie Storage in HttpConnection.
+
+ @since 1.14.1 */
+class CookieUtil {
+    // cookie manager get() wants request headers but doesn&#x27;t use them, so we just pass a dummy object here
+<span id="H2">    private static final Map&lt;String, List&lt;String&gt;&gt; EmptyRequestHeaders = Collections.unmodifiableMap(new HashMap&lt;&gt;());</span>
+    private static final String Sep = &quot;; &quot;;
+    private static final String CookieName = &quot;Cookie&quot;;
+    private static final String Cookie2Name = &quot;Cookie2&quot;;
+
+    /**
+     Pre-request, get any applicable headers out of the Request cookies and the Cookie Store, and add them to the request
+     headers. If the Cookie Store duplicates any Request cookies (same name and value), they will be discarded.
+     */
+    static void applyCookiesToRequest(HttpConnection.Request req, HttpURLConnection con) throws IOException {
+        // Request key/val cookies. LinkedHashSet used to preserve order, as cookie store will return most specific path first
+<span id="H2">        Set&lt;String&gt; cookieSet = requestCookieSet(req);</span>
+<span id="H2">        Set&lt;String&gt; cookies2 = null;</span>
+
+        // stored:
+<span id="H2">        Map&lt;String, List&lt;String&gt;&gt; storedCookies = req.cookieManager().get(asUri(req.url), EmptyRequestHeaders);</span>
+<span id="H2">        for (Map.Entry&lt;String, List&lt;String&gt;&gt; entry : storedCookies.entrySet()) {</span>
+            // might be Cookie: name=value; name=value\nCookie2: name=value; name=value
+<span id="H2">            List&lt;String&gt; cookies = entry.getValue(); // these will be name=val</span>
+<span id="H2">            if (cookies == null || cookies.size() == 0) // the cookie store often returns just an empty &quot;Cookie&quot; key, no val</span>
+<span id="H2">                continue;</span>
+
+<span id="H2">            String key = entry.getKey(); // Cookie or Cookie2</span>
+            Set&lt;String&gt; set;
+<span id="H2">            if (CookieName.equals(key))</span>
+<span id="H2">                set = cookieSet;</span>
+            else if (Cookie2Name.equals(key)) {
+                set = new HashSet&lt;&gt;();
+                cookies2 = set;
+            } else {
+                continue; // unexpected header key
+            }
+<span id="H2">            set.addAll(cookies);</span>
+<span id="H2">        }</span>
+
+<span id="H2">        if (cookieSet.size() &gt; 0)</span>
+<span id="H2">            con.addRequestProperty(CookieName, StringUtil.join(cookieSet, Sep));</span>
+<span id="H2">        if (cookies2 != null &amp;&amp; cookies2.size() &gt; 0)</span>
+            con.addRequestProperty(Cookie2Name, StringUtil.join(cookies2, Sep));
+<span id="H2">    }</span>
+
+    private static LinkedHashSet&lt;String&gt; requestCookieSet(Connection.Request req) {
+<span id="H2">        LinkedHashSet&lt;String&gt; set = new LinkedHashSet&lt;&gt;();</span>
+        // req cookies are the wildcard key/val cookies (no domain, path, etc)
+<span id="H2">        for (Map.Entry&lt;String, String&gt; cookie : req.cookies().entrySet()) {</span>
+<span id="H2">            set.add(cookie.getKey() + &quot;=&quot; + cookie.getValue());</span>
+<span id="H2">        }</span>
+<span id="H2">        return set;</span>
+    }
+
+    static URI asUri(URL url) throws IOException {
+        try {
+<span id="H2">            return url.toURI();</span>
+        } catch (URISyntaxException e) {  // this would be a WTF because we construct the URL
+            MalformedURLException ue = new MalformedURLException(e.getMessage());
+            ue.initCause(e);
+            throw ue;
+        }
+    }
+
+    static void storeCookies(HttpConnection.Request req, URL url, Map&lt;String, List&lt;String&gt;&gt; resHeaders) throws IOException {
+<span id="H2">        req.cookieManager().put(CookieUtil.asUri(url), resHeaders); // stores cookies for session</span>
+
+<span id="H2">    }</span>
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

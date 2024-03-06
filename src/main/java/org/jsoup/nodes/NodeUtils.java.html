@@ -1,0 +1,86 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/nodes/NodeUtils.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">nodes</a>/NodeUtils.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.nodes;
+
+import org.jsoup.helper.Validate;
+import org.jsoup.helper.W3CDom;
+import org.jsoup.parser.HtmlTreeBuilder;
+import org.jsoup.parser.Parser;
+import org.w3c.dom.NodeList;
+
+import java.util.Iterator;
+import java.util.List;
+import java.util.Spliterator;
+import java.util.Spliterators;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
+
+/**
+ * Internal helpers for Nodes, to keep the actual node APIs relatively clean. A jsoup internal class, so don&#x27;t use it as
+ * there is no contract API.
+ */
+final class NodeUtils {
+    /**
+     * Get the output setting for this node,  or if this node has no document (or parent), retrieve the default output
+     * settings
+     */
+    static Document.OutputSettings outputSettings(Node node) {
+<span id="H1">        Document owner = node.ownerDocument();</span>
+<span id="H1">        return owner != null ? owner.outputSettings() : (new Document(&quot;&quot;)).outputSettings();</span>
+    }
+
+    /**
+     * Get the parser that was used to make this node, or the default HTML parser if it has no parent.
+     */
+    static Parser parser(Node node) {
+<span id="H1">        Document doc = node.ownerDocument();</span>
+<span id="H1">        return doc != null &amp;&amp; doc.parser() != null ? doc.parser() : new Parser(new HtmlTreeBuilder());</span>
+    }
+
+    /**
+     This impl works by compiling the input xpath expression, and then evaluating it against a W3C Document converted
+     from the original jsoup element. The original jsoup elements are then fetched from the w3c doc user data (where we
+     stashed them during conversion). This process could potentially be optimized by transpiling the compiled xpath
+     expression to a jsoup Evaluator when there&#x27;s 1:1 support, thus saving the W3C document conversion stage.
+     */
+    static &lt;T extends Node&gt; List&lt;T&gt; selectXpath(String xpath, Element el, Class&lt;T&gt; nodeType) {
+<span id="H1">        Validate.notEmpty(xpath);</span>
+<span id="H1">        Validate.notNull(el);</span>
+<span id="H1">        Validate.notNull(nodeType);</span>
+
+<span id="H1">        W3CDom w3c = new W3CDom().namespaceAware(false);</span>
+<span id="H1">        org.w3c.dom.Document wDoc = w3c.fromJsoup(el);</span>
+<span id="H1">        org.w3c.dom.Node contextNode = w3c.contextNode(wDoc);</span>
+<span id="H1">        NodeList nodeList = w3c.selectXpath(xpath, contextNode);</span>
+<span id="H1">        return w3c.sourceNodes(nodeList, nodeType);</span>
+    }
+
+    /** Creates a Stream, starting with the supplied node. */
+    static &lt;T extends Node&gt; Stream&lt;T&gt; stream(Node start, Class&lt;T&gt; type) {
+<span id="H1">        NodeIterator&lt;T&gt; iterator = new NodeIterator&lt;&gt;(start, type);</span>
+<span id="H1">        Spliterator&lt;T&gt; spliterator = spliterator(iterator);</span>
+
+<span id="H1">        return StreamSupport.stream(spliterator, false);</span>
+    }
+
+    static &lt;T extends Node&gt; Spliterator&lt;T&gt; spliterator(Iterator&lt;T&gt; iterator) {
+<span id="H1">        return Spliterators.spliteratorUnknownSize(</span>
+                iterator,
+                Spliterator.DISTINCT | Spliterator.NONNULL | Spliterator.ORDERED);
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

@@ -1,0 +1,384 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/nodes/Entities.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">nodes</a>/Entities.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.nodes;
+
+import org.jsoup.SerializationException;
+import org.jsoup.internal.StringUtil;
+import org.jsoup.helper.Validate;
+import org.jsoup.nodes.Document.OutputSettings;
+import org.jsoup.parser.CharacterReader;
+import org.jsoup.parser.Parser;
+import org.jspecify.annotations.Nullable;
+
+import java.io.IOException;
+import java.nio.charset.CharsetEncoder;
+import java.util.Arrays;
+import java.util.HashMap;
+
+import static org.jsoup.nodes.Document.OutputSettings.*;
+import static org.jsoup.nodes.Entities.EscapeMode.base;
+import static org.jsoup.nodes.Entities.EscapeMode.extended;
+
+/**
+ * HTML entities, and escape routines. Source: &lt;a href=&quot;http://www.w3.org/TR/html5/named-character-references.html#named-character-references&quot;&gt;W3C
+ * HTML named character references&lt;/a&gt;.
+ */
+public class Entities {
+    private static final int empty = -1;
+    private static final String emptyName = &quot;&quot;;
+    static final int codepointRadix = 36;
+<span id="H0">    private static final char[] codeDelims = {&#x27;,&#x27;, &#x27;;&#x27;};</span>
+<span id="H0">    private static final HashMap&lt;String, String&gt; multipoints = new HashMap&lt;&gt;(); // name -&gt; multiple character references</span>
+
+<span id="H0">    public enum EscapeMode {</span>
+        /**
+         * Restricted entities suitable for XHTML output: lt, gt, amp, and quot only.
+         */
+<span id="H0">        xhtml(EntitiesData.xmlPoints, 4),</span>
+        /**
+         * Default HTML output entities.
+         */
+<span id="H0">        base(EntitiesData.basePoints, 106),</span>
+        /**
+         * Complete HTML entities.
+         */
+<span id="H0">        extended(EntitiesData.fullPoints, 2125);</span>
+
+        // table of named references to their codepoints. sorted so we can binary search. built by BuildEntities.
+        private String[] nameKeys;
+        private int[] codeVals; // limitation is the few references with multiple characters; those go into multipoints.
+
+        // table of codepoints to named entities.
+        private int[] codeKeys; // we don&#x27;t support multicodepoints to single named value currently
+        private String[] nameVals;
+
+<span id="H0">        EscapeMode(String file, int size) {</span>
+<span id="H0">            load(this, file, size);</span>
+<span id="H0">        }</span>
+
+        int codepointForName(final String name) {
+<span id="H0">            int index = Arrays.binarySearch(nameKeys, name);</span>
+<span id="H0">            return index &gt;= 0 ? codeVals[index] : empty;</span>
+        }
+
+        String nameForCodepoint(final int codepoint) {
+<span id="H0">            final int index = Arrays.binarySearch(codeKeys, codepoint);</span>
+<span id="H0">            if (index &gt;= 0) {</span>
+                // the results are ordered so lower case versions of same codepoint come after uppercase, and we prefer to emit lower
+                // (and binary search for same item with multi results is undefined
+<span id="H0">                return (index &lt; nameVals.length - 1 &amp;&amp; codeKeys[index + 1] == codepoint) ?</span>
+<span id="H0">                    nameVals[index + 1] : nameVals[index];</span>
+            }
+<span id="H1">            return emptyName;</span>
+        }
+
+        private int size() {
+            return nameKeys.length;
+        }
+    }
+
+    private Entities() {
+    }
+
+    /**
+     * Check if the input is a known named entity
+     *
+     * @param name the possible entity name (e.g. &quot;lt&quot; or &quot;amp&quot;)
+     * @return true if a known named entity
+     */
+    public static boolean isNamedEntity(final String name) {
+<span id="H1">        return extended.codepointForName(name) != empty;</span>
+    }
+
+    /**
+     * Check if the input is a known named entity in the base entity set.
+     *
+     * @param name the possible entity name (e.g. &quot;lt&quot; or &quot;amp&quot;)
+     * @return true if a known named entity in the base set
+     * @see #isNamedEntity(String)
+     */
+    public static boolean isBaseNamedEntity(final String name) {
+<span id="H1">        return base.codepointForName(name) != empty;</span>
+    }
+
+    /**
+     * Get the character(s) represented by the named entity
+     *
+     * @param name entity (e.g. &quot;lt&quot; or &quot;amp&quot;)
+     * @return the string value of the character(s) represented by this entity, or &quot;&quot; if not defined
+     */
+    public static String getByName(String name) {
+<span id="H0">        String val = multipoints.get(name);</span>
+<span id="H0">        if (val != null)</span>
+            return val;
+<span id="H0">        int codepoint = extended.codepointForName(name);</span>
+<span id="H0">        if (codepoint != empty)</span>
+<span id="H0">            return new String(new int[]{codepoint}, 0, 1);</span>
+        return emptyName;
+    }
+
+    public static int codepointsForName(final String name, final int[] codepoints) {
+<span id="H1">        String val = multipoints.get(name);</span>
+<span id="H1">        if (val != null) {</span>
+<span id="H1">            codepoints[0] = val.codePointAt(0);</span>
+<span id="H1">            codepoints[1] = val.codePointAt(1);</span>
+<span id="H1">            return 2;</span>
+        }
+<span id="H1">        int codepoint = extended.codepointForName(name);</span>
+<span id="H1">        if (codepoint != empty) {</span>
+<span id="H1">            codepoints[0] = codepoint;</span>
+<span id="H1">            return 1;</span>
+        }
+        return 0;
+    }
+
+    /**
+     * HTML escape an input string. That is, {@code &lt;} is returned as {@code &amp;lt;}
+     *
+     * @param string the un-escaped string to escape
+     * @param out the output settings to use
+     * @return the escaped string
+     */
+    public static String escape(String string, OutputSettings out) {
+<span id="H1">        if (string == null)</span>
+<span id="H2">            return &quot;&quot;;</span>
+<span id="H1">        StringBuilder accum = StringUtil.borrowBuilder();</span>
+        try {
+<span id="H1">            escape(accum, string, out, false, false, false, false);</span>
+        } catch (IOException e) {
+            throw new SerializationException(e); // doesn&#x27;t happen
+<span id="H1">        }</span>
+<span id="H1">        return StringUtil.releaseBuilder(accum);</span>
+    }
+
+    /**
+     * HTML escape an input string, using the default settings (UTF-8, base entities). That is, {@code &lt;} is returned as
+     * {@code &amp;lt;}
+     *
+     * @param string the un-escaped string to escape
+     * @return the escaped string
+     */
+    public static String escape(String string) {
+<span id="H2">        if (DefaultOutput == null)</span>
+<span id="H2">            DefaultOutput = new OutputSettings();</span>
+<span id="H2">        return escape(string, DefaultOutput);</span>
+    }
+    private static @Nullable OutputSettings DefaultOutput; // lazy-init, to break circular dependency with OutputSettings
+
+    // this method does a lot, but other breakups cause rescanning and stringbuilder generations
+    static void escape(Appendable accum, String string, OutputSettings out,
+                       boolean inAttribute, boolean normaliseWhite, boolean stripLeadingWhite, boolean trimTrailing) throws IOException {
+
+<span id="H1">        boolean lastWasWhite = false;</span>
+<span id="H1">        boolean reachedNonWhite = false;</span>
+<span id="H1">        final EscapeMode escapeMode = out.escapeMode();</span>
+<span id="H1">        final CharsetEncoder encoder = out.encoder();</span>
+<span id="H1">        final CoreCharset coreCharset = out.coreCharset; // init in out.prepareEncoder()</span>
+<span id="H1">        final int length = string.length();</span>
+
+        int codePoint;
+<span id="H1">        boolean skipped = false;</span>
+<span id="H1">        for (int offset = 0; offset &lt; length; offset += Character.charCount(codePoint)) {</span>
+<span id="H1">            codePoint = string.codePointAt(offset);</span>
+
+<span id="H1">            if (normaliseWhite) {</span>
+<span id="H2">                if (StringUtil.isWhitespace(codePoint)) {</span>
+<span id="H2">                    if (stripLeadingWhite &amp;&amp; !reachedNonWhite) continue;</span>
+<span id="H2">                    if (lastWasWhite) continue;</span>
+<span id="H2">                    if (trimTrailing) {</span>
+<span id="H2">                        skipped = true;</span>
+<span id="H2">                        continue;</span>
+                    }
+<span id="H2">                    accum.append(&#x27; &#x27;);</span>
+<span id="H2">                    lastWasWhite = true;</span>
+<span id="H2">                    continue;</span>
+                } else {
+<span id="H2">                    lastWasWhite = false;</span>
+<span id="H2">                    reachedNonWhite = true;</span>
+<span id="H2">                    if (skipped) {</span>
+<span id="H2">                        accum.append(&#x27; &#x27;); // wasn&#x27;t the end, so need to place a normalized space</span>
+<span id="H2">                        skipped = false;</span>
+                    }
+                }
+            }
+            // surrogate pairs, split implementation for efficiency on single char common case (saves creating strings, char[]):
+<span id="H1">            if (codePoint &lt; Character.MIN_SUPPLEMENTARY_CODE_POINT) {</span>
+<span id="H1">                final char c = (char) codePoint;</span>
+                // html specific and required escapes:
+<span id="H1">                switch (c) {</span>
+                    case &#x27;&amp;&#x27;:
+<span id="H1">                        accum.append(&quot;&amp;amp;&quot;);</span>
+<span id="H1">                        break;</span>
+                    case 0xA0:
+<span id="H2">                        if (escapeMode != EscapeMode.xhtml)</span>
+<span id="H2">                            accum.append(&quot;&amp;nbsp;&quot;);</span>
+                        else
+<span id="H2">                            accum.append(&quot;&amp;#xa0;&quot;);</span>
+<span id="H2">                        break;</span>
+                    case &#x27;&lt;&#x27;:
+                        // escape when in character data or when in a xml attribute val or XML syntax; not needed in html attr val
+<span id="H1">                        if (!inAttribute || escapeMode == EscapeMode.xhtml || out.syntax() == Syntax.xml)</span>
+<span id="H1">                            accum.append(&quot;&amp;lt;&quot;);</span>
+                        else
+<span id="H2">                            accum.append(c);</span>
+<span id="H2">                        break;</span>
+                    case &#x27;&gt;&#x27;:
+<span id="H1">                        if (!inAttribute)</span>
+<span id="H1">                            accum.append(&quot;&amp;gt;&quot;);</span>
+                        else
+<span id="H2">                            accum.append(c);</span>
+<span id="H2">                        break;</span>
+                    case &#x27;&quot;&#x27;:
+<span id="H2">                        if (inAttribute)</span>
+<span id="H2">                            accum.append(&quot;&amp;quot;&quot;);</span>
+                        else
+<span id="H2">                            accum.append(c);</span>
+<span id="H2">                        break;</span>
+                    // we escape ascii control &lt;x20 (other than tab, line-feed, carriage return)  for XML compliance (required) and HTML ease of reading (not required) - https://www.w3.org/TR/xml/#charsets
+                    case 0x9:
+                    case 0xA:
+                    case 0xD:
+<span id="H1">                        accum.append(c);</span>
+<span id="H1">                        break;</span>
+                    default:
+<span id="H1">                        if (c &lt; 0x20 || !canEncode(coreCharset, c, encoder))</span>
+<span id="H1">                            appendEncoded(accum, escapeMode, codePoint);</span>
+                        else
+<span id="H1">                            accum.append(c);</span>
+                }
+<span id="H1">            } else {</span>
+<span id="H1">                final String c = new String(Character.toChars(codePoint));</span>
+<span id="H1">                if (encoder.canEncode(c)) // uses fallback encoder for simplicity</span>
+<span id="H1">                    accum.append(c);</span>
+                else
+<span id="H1">                    appendEncoded(accum, escapeMode, codePoint);</span>
+            }
+        }
+<span id="H1">    }</span>
+
+    private static void appendEncoded(Appendable accum, EscapeMode escapeMode, int codePoint) throws IOException {
+<span id="H1">        final String name = escapeMode.nameForCodepoint(codePoint);</span>
+<span id="H1">        if (!emptyName.equals(name)) // ok for identity check</span>
+<span id="H1">            accum.append(&#x27;&amp;&#x27;).append(name).append(&#x27;;&#x27;);</span>
+        else
+<span id="H1">            accum.append(&quot;&amp;#x&quot;).append(Integer.toHexString(codePoint)).append(&#x27;;&#x27;);</span>
+<span id="H1">    }</span>
+
+    /**
+     * Un-escape an HTML escaped string. That is, {@code &amp;lt;} is returned as {@code &lt;}.
+     *
+     * @param string the HTML string to un-escape
+     * @return the unescaped string
+     */
+    public static String unescape(String string) {
+<span id="H1">        return unescape(string, false);</span>
+    }
+
+    /**
+     * Unescape the input string.
+     *
+     * @param string to un-HTML-escape
+     * @param strict if &quot;strict&quot; (that is, requires trailing &#x27;;&#x27; char, otherwise that&#x27;s optional)
+     * @return unescaped string
+     */
+    static String unescape(String string, boolean strict) {
+<span id="H1">        return Parser.unescapeEntities(string, strict);</span>
+    }
+
+    /*
+     * Provides a fast-path for Encoder.canEncode, which drastically improves performance on Android post JellyBean.
+     * After KitKat, the implementation of canEncode degrades to the point of being useless. For non ASCII or UTF,
+     * performance may be bad. We can add more encoders for common character sets that are impacted by performance
+     * issues on Android if required.
+     *
+     * Benchmarks:     *
+     * OLD toHtml() impl v New (fastpath) in millis
+     * Wiki: 1895, 16
+     * CNN: 6378, 55
+     * Alterslash: 3013, 28
+     * Jsoup: 167, 2
+     */
+    private static boolean canEncode(final CoreCharset charset, final char c, final CharsetEncoder fallback) {
+        // todo add more charset tests if impacted by Android&#x27;s bad perf in canEncode
+<span id="H1">        switch (charset) {</span>
+            case ascii:
+<span id="H1">                return c &lt; 0x80;</span>
+            case utf:
+<span id="H1">                return true; // real is:!(Character.isLowSurrogate(c) || Character.isHighSurrogate(c)); - but already check above</span>
+            default:
+<span id="H2">                return fallback.canEncode(c);</span>
+        }
+    }
+
+<span id="H1">    enum CoreCharset {</span>
+<span id="H1">        ascii, utf, fallback;</span>
+
+        static CoreCharset byName(final String name) {
+<span id="H1">            if (name.equals(&quot;US-ASCII&quot;))</span>
+<span id="H1">                return ascii;</span>
+<span id="H1">            if (name.startsWith(&quot;UTF-&quot;)) // covers UTF-8, UTF-16, et al</span>
+<span id="H1">                return utf;</span>
+<span id="H2">            return fallback;</span>
+        }
+    }
+
+    private static void load(EscapeMode e, String pointsData, int size) {
+<span id="H0">        e.nameKeys = new String[size];</span>
+<span id="H0">        e.codeVals = new int[size];</span>
+<span id="H0">        e.codeKeys = new int[size];</span>
+<span id="H0">        e.nameVals = new String[size];</span>
+
+<span id="H0">        int i = 0;</span>
+<span id="H0">        CharacterReader reader = new CharacterReader(pointsData);</span>
+        try {
+<span id="H0">            while (!reader.isEmpty()) {</span>
+                // NotNestedLessLess=10913,824;1887&amp;
+
+<span id="H0">                final String name = reader.consumeTo(&#x27;=&#x27;);</span>
+<span id="H0">                reader.advance();</span>
+<span id="H0">                final int cp1 = Integer.parseInt(reader.consumeToAny(codeDelims), codepointRadix);</span>
+<span id="H0">                final char codeDelim = reader.current();</span>
+<span id="H0">                reader.advance();</span>
+                final int cp2;
+<span id="H0">                if (codeDelim == &#x27;,&#x27;) {</span>
+<span id="H0">                    cp2 = Integer.parseInt(reader.consumeTo(&#x27;;&#x27;), codepointRadix);</span>
+<span id="H0">                    reader.advance();</span>
+                } else {
+<span id="H0">                    cp2 = empty;</span>
+                }
+<span id="H0">                final String indexS = reader.consumeTo(&#x27;&amp;&#x27;);</span>
+<span id="H0">                final int index = Integer.parseInt(indexS, codepointRadix);</span>
+<span id="H0">                reader.advance();</span>
+
+<span id="H0">                e.nameKeys[i] = name;</span>
+<span id="H0">                e.codeVals[i] = cp1;</span>
+<span id="H0">                e.codeKeys[index] = cp1;</span>
+<span id="H0">                e.nameVals[index] = name;</span>
+
+<span id="H0">                if (cp2 != empty) {</span>
+<span id="H0">                    multipoints.put(name, new String(new int[]{cp1, cp2}, 0, 2));</span>
+                }
+<span id="H0">                i++;</span>
+<span id="H0">            }</span>
+
+<span id="H0">            Validate.isTrue(i == size, &quot;Unexpected count of entities loaded&quot;);</span>
+        } finally {
+<span id="H0">            reader.close();</span>
+        }
+<span id="H0">    }</span>
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

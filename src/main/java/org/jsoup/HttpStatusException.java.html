@@ -1,0 +1,42 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/HttpStatusException.java</title>
+<link rel="stylesheet" href="../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../index.html">src</a>/<a href="../../../index.html">main</a>/<a href="../../index.html">java</a>/<a href="../index.html">org</a>/<a href="index.html">jsoup</a>/HttpStatusException.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup;
+
+import java.io.IOException;
+
+/**
+ * Signals that a HTTP request resulted in a not OK HTTP response.
+ */
+public class HttpStatusException extends IOException {
+    private final int statusCode;
+    private final String url;
+
+    public HttpStatusException(String message, int statusCode, String url) {
+<span id="H2">        super(message + &quot;. Status=&quot; + statusCode + &quot;, URL=[&quot; + url + &quot;]&quot;);</span>
+<span id="H2">        this.statusCode = statusCode;</span>
+<span id="H2">        this.url = url;</span>
+<span id="H2">    }</span>
+
+    public int getStatusCode() {
+<span id="H2">        return statusCode;</span>
+    }
+
+    public String getUrl() {
+<span id="H2">        return url;</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

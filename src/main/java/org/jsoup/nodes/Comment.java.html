@@ -1,0 +1,115 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/nodes/Comment.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">nodes</a>/Comment.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.nodes;
+
+import org.jsoup.parser.ParseSettings;
+import org.jsoup.parser.Parser;
+import org.jspecify.annotations.Nullable;
+
+import java.io.IOException;
+
+/**
+ A comment node.
+
+ @author Jonathan Hedley, jonathan@hedley.net */
+public class Comment extends LeafNode {
+    /**
+     Create a new comment node.
+     @param data The contents of the comment
+     */
+<span id="H0">    public Comment(String data) {</span>
+<span id="H0">        value = data;</span>
+<span id="H0">    }</span>
+
+    public String nodeName() {
+<span id="H0">        return &quot;#comment&quot;;</span>
+    }
+
+    /**
+     Get the contents of the comment.
+     @return comment content
+     */
+    public String getData() {
+<span id="H1">        return coreValue();</span>
+    }
+
+    public Comment setData(String data) {
+<span id="H2">        coreValue(data);</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+	void outerHtmlHead(Appendable accum, int depth, Document.OutputSettings out) throws IOException {
+<span id="H2">        if (out.prettyPrint() &amp;&amp; ((isEffectivelyFirst() &amp;&amp; parentNode instanceof Element &amp;&amp; ((Element) parentNode).tag().formatAsBlock()) || (out.outline() )))</span>
+<span id="H2">            indent(accum, depth, out);</span>
+<span id="H2">        accum</span>
+<span id="H2">                .append(&quot;&lt;!--&quot;)</span>
+<span id="H2">                .append(getData())</span>
+<span id="H2">                .append(&quot;--&gt;&quot;);</span>
+<span id="H2">    }</span>
+
+    @Override
+<span id="H2">    void outerHtmlTail(Appendable accum, int depth, Document.OutputSettings out) {}</span>
+
+    @Override
+    public String toString() {
+<span id="H3">        return outerHtml();</span>
+    }
+
+    @Override
+    public Comment clone() {
+<span id="H2">        return (Comment) super.clone();</span>
+    }
+
+    /**
+     * Check if this comment looks like an XML Declaration.
+     * @return true if it looks like, maybe, it&#x27;s an XML Declaration.
+     */
+    public boolean isXmlDeclaration() {
+<span id="H2">        String data = getData();</span>
+<span id="H2">        return isXmlDeclarationData(data);</span>
+    }
+
+    private static boolean isXmlDeclarationData(String data) {
+<span id="H2">        return (data.length() &gt; 1 &amp;&amp; (data.startsWith(&quot;!&quot;) || data.startsWith(&quot;?&quot;)));</span>
+    }
+
+    /**
+     * Attempt to cast this comment to an XML Declaration node.
+     * @return an XML declaration if it could be parsed as one, null otherwise.
+     */
+    public @Nullable XmlDeclaration asXmlDeclaration() {
+<span id="H3">        String data = getData();</span>
+
+<span id="H3">        XmlDeclaration decl = null;</span>
+<span id="H3">        String declContent = data.substring(1, data.length() - 1);</span>
+        // make sure this bogus comment is not immediately followed by another, treat as comment if so
+<span id="H3">        if (isXmlDeclarationData(declContent))</span>
+            return null;
+
+<span id="H3">        String fragment = &quot;&lt;&quot; + declContent + &quot;&gt;&quot;;</span>
+        // use the HTML parser not XML, so we don&#x27;t get into a recursive XML Declaration on contrived data
+<span id="H3">        Document doc = Parser.htmlParser().settings(ParseSettings.preserveCase).parseInput(fragment, baseUri());</span>
+<span id="H3">        if (doc.body().childrenSize() &gt; 0) {</span>
+<span id="H3">            Element el = doc.body().child(0);</span>
+<span id="H3">            decl = new XmlDeclaration(NodeUtils.parser(doc).settings().normalizeTag(el.tagName()), data.startsWith(&quot;!&quot;));</span>
+<span id="H3">            decl.attributes().addAll(el.attributes());</span>
+        }
+<span id="H3">        return decl;</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

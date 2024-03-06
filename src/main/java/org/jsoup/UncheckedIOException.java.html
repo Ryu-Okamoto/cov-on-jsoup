@@ -1,0 +1,39 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/UncheckedIOException.java</title>
+<link rel="stylesheet" href="../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../index.html">src</a>/<a href="../../../index.html">main</a>/<a href="../../index.html">java</a>/<a href="../index.html">org</a>/<a href="index.html">jsoup</a>/UncheckedIOException.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup;
+
+import java.io.IOException;
+
+/**
+ * @deprecated Use {@link java.io.UncheckedIOException} instead. This class acted as a compatibility shim for Java
+ * versions prior to 1.8.
+ */
+// todo annotate @Deprecated in next release (after previous @Deprecations clear)
+public class UncheckedIOException extends java.io.UncheckedIOException {
+    public UncheckedIOException(IOException cause) {
+<span id="H0">        super(cause);</span>
+<span id="H0">    }</span>
+
+    public UncheckedIOException(String message) {
+        super(new IOException(message));
+    }
+
+    public IOException ioException() {
+        return getCause();
+    }
+}</pre>
+</div>
+<script src="../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

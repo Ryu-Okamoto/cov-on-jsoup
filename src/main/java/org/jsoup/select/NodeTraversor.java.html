@@ -1,0 +1,164 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/select/NodeTraversor.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">select</a>/NodeTraversor.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.select;
+
+import org.jsoup.helper.Validate;
+import org.jsoup.nodes.Element;
+import org.jsoup.nodes.Node;
+import org.jsoup.select.NodeFilter.FilterResult;
+
+/**
+ A depth-first node traversor. Use to walk through all nodes under and including the specified root node, in document
+ order. The {@link NodeVisitor#head(Node, int)} and {@link NodeVisitor#tail(Node, int)} methods will be called for
+ each node.
+ &lt;p&gt; During traversal, structural changes to nodes are supported (e.g. {{@link Node#replaceWith(Node)},
+ {@link Node#remove()}}
+ &lt;/p&gt;
+ */
+<span id="H1">public class NodeTraversor {</span>
+    /**
+     Run a depth-first traverse of the root and all of its descendants.
+     @param visitor Node visitor.
+     @param root the initial node point to traverse.
+     @see NodeVisitor
+     */
+    public static void traverse(NodeVisitor visitor, Node root) {
+<span id="H1">        Validate.notNull(visitor);</span>
+<span id="H1">        Validate.notNull(root);</span>
+<span id="H1">        Node node = root;</span>
+<span id="H1">        int depth = 0;</span>
+        
+<span id="H1">        while (node != null) {</span>
+<span id="H1">            Node parent = node.parentNode(); // remember parent to find nodes that get replaced in .head</span>
+<span id="H1">            int origSize = parent != null ? parent.childNodeSize() : 0;</span>
+<span id="H1">            Node next = node.nextSibling();</span>
+
+<span id="H1">            visitor.head(node, depth); // visit current node</span>
+<span id="H1">            if (parent != null &amp;&amp; !node.hasParent()) { // removed or replaced</span>
+<span id="H2">                if (origSize == parent.childNodeSize()) { // replaced</span>
+<span id="H2">                    node = parent.childNode(node.siblingIndex()); // replace ditches parent but keeps sibling index</span>
+                } else { // removed
+<span id="H3">                    node = next;</span>
+<span id="H3">                    if (node == null) { // last one, go up</span>
+<span id="H3">                        node = parent;</span>
+<span id="H3">                        depth--;</span>
+                    }
+                    continue; // don&#x27;t tail removed
+                }
+            }
+
+<span id="H1">            if (node.childNodeSize() &gt; 0) { // descend</span>
+<span id="H1">                node = node.childNode(0);</span>
+<span id="H1">                depth++;</span>
+            } else {
+                while (true) {
+<span id="H1">                    assert node != null; // as depth &gt; 0, will have parent</span>
+<span id="H1">                    if (!(node.nextSibling() == null &amp;&amp; depth &gt; 0)) break;</span>
+<span id="H1">                    visitor.tail(node, depth); // when no more siblings, ascend</span>
+<span id="H1">                    node = node.parentNode();</span>
+<span id="H1">                    depth--;</span>
+                }
+<span id="H1">                visitor.tail(node, depth);</span>
+<span id="H1">                if (node == root)</span>
+<span id="H1">                    break;</span>
+<span id="H1">                node = node.nextSibling();</span>
+            }
+<span id="H1">        }</span>
+<span id="H1">    }</span>
+
+    /**
+     Run a depth-first traversal of each Element.
+     @param visitor Node visitor.
+     @param elements Elements to traverse.
+     */
+    public static void traverse(NodeVisitor visitor, Elements elements) {
+<span id="H2">        Validate.notNull(visitor);</span>
+<span id="H2">        Validate.notNull(elements);</span>
+<span id="H2">        for (Element el : elements)</span>
+<span id="H2">            traverse(visitor, el);</span>
+<span id="H2">    }</span>
+
+    /**
+     Run a depth-first filtered traversal of the root and all of its descendants.
+     @param filter NodeFilter visitor.
+     @param root the root node point to traverse.
+     @return The filter result of the root node, or {@link FilterResult#STOP}.
+
+     @see NodeFilter
+     */
+    public static FilterResult filter(NodeFilter filter, Node root) {
+<span id="H1">        Node node = root;</span>
+<span id="H1">        int depth = 0;</span>
+
+<span id="H1">        while (node != null) {</span>
+<span id="H1">            FilterResult result = filter.head(node, depth);</span>
+<span id="H1">            if (result == FilterResult.STOP)</span>
+<span id="H2">                return result;</span>
+            // Descend into child nodes:
+<span id="H1">            if (result == FilterResult.CONTINUE &amp;&amp; node.childNodeSize() &gt; 0) {</span>
+<span id="H1">                node = node.childNode(0);</span>
+<span id="H1">                ++depth;</span>
+<span id="H1">                continue;</span>
+            }
+            // No siblings, move upwards:
+            while (true) {
+<span id="H1">                assert node != null; // depth &gt; 0, so has parent</span>
+<span id="H1">                if (!(node.nextSibling() == null &amp;&amp; depth &gt; 0)) break;</span>
+                // &#x27;tail&#x27; current node:
+<span id="H1">                if (result == FilterResult.CONTINUE || result == FilterResult.SKIP_CHILDREN) {</span>
+<span id="H1">                    result = filter.tail(node, depth);</span>
+<span id="H1">                    if (result == FilterResult.STOP)</span>
+<span id="H2">                        return result;</span>
+                }
+<span id="H1">                Node prev = node; // In case we need to remove it below.</span>
+<span id="H1">                node = node.parentNode();</span>
+<span id="H1">                depth--;</span>
+<span id="H1">                if (result == FilterResult.REMOVE)</span>
+<span id="H3">                    prev.remove(); // Remove AFTER finding parent.</span>
+<span id="H1">                result = FilterResult.CONTINUE; // Parent was not pruned.</span>
+<span id="H1">            }</span>
+            // &#x27;tail&#x27; current node, then proceed with siblings:
+<span id="H1">            if (result == FilterResult.CONTINUE || result == FilterResult.SKIP_CHILDREN) {</span>
+<span id="H1">                result = filter.tail(node, depth);</span>
+<span id="H1">                if (result == FilterResult.STOP)</span>
+                    return result;
+            }
+<span id="H1">            if (node == root)</span>
+<span id="H1">                return result;</span>
+<span id="H2">            Node prev = node; // In case we need to remove it below.</span>
+<span id="H2">            node = node.nextSibling();</span>
+<span id="H2">            if (result == FilterResult.REMOVE)</span>
+<span id="H2">                prev.remove(); // Remove AFTER finding sibling.</span>
+<span id="H2">        }</span>
+        // root == null?
+        return FilterResult.CONTINUE;
+    }
+
+    /**
+     Run a depth-first filtered traversal of each Element.
+     @param filter NodeFilter visitor.
+     @see NodeFilter
+     */
+    public static void filter(NodeFilter filter, Elements elements) {
+<span id="H2">        Validate.notNull(filter);</span>
+<span id="H2">        Validate.notNull(elements);</span>
+<span id="H2">        for (Element el : elements)</span>
+<span id="H2">            if (filter(filter, el) == FilterResult.STOP)</span>
+<span id="H2">                break;</span>
+<span id="H2">    }</span>
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

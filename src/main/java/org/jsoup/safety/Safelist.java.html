@@ -1,0 +1,708 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/safety/Safelist.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">safety</a>/Safelist.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.safety;
+
+/*
+    Thank you to Ryan Grove (wonko.com) for the Ruby HTML cleaner http://github.com/rgrove/sanitize/, which inspired
+    this safe-list configuration, and the initial defaults.
+ */
+
+import org.jsoup.helper.Validate;
+import org.jsoup.internal.Normalizer;
+import org.jsoup.nodes.Attribute;
+import org.jsoup.nodes.Attributes;
+import org.jsoup.nodes.Element;
+
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Set;
+
+import static org.jsoup.internal.Normalizer.lowerCase;
+
+
+/**
+ Safe-lists define what HTML (elements and attributes) to allow through the cleaner. Everything else is removed.
+ &lt;p&gt;
+ Start with one of the defaults:
+ &lt;/p&gt;
+ &lt;ul&gt;
+ &lt;li&gt;{@link #none}
+ &lt;li&gt;{@link #simpleText}
+ &lt;li&gt;{@link #basic}
+ &lt;li&gt;{@link #basicWithImages}
+ &lt;li&gt;{@link #relaxed}
+ &lt;/ul&gt;
+ &lt;p&gt;
+ If you need to allow more through (please be careful!), tweak a base safelist with:
+ &lt;/p&gt;
+ &lt;ul&gt;
+ &lt;li&gt;{@link #addTags(String... tagNames)}
+ &lt;li&gt;{@link #addAttributes(String tagName, String... attributes)}
+ &lt;li&gt;{@link #addEnforcedAttribute(String tagName, String attribute, String value)}
+ &lt;li&gt;{@link #addProtocols(String tagName, String attribute, String... protocols)}
+ &lt;/ul&gt;
+ &lt;p&gt;
+ You can remove any setting from an existing safelist with:
+ &lt;/p&gt;
+ &lt;ul&gt;
+ &lt;li&gt;{@link #removeTags(String... tagNames)}
+ &lt;li&gt;{@link #removeAttributes(String tagName, String... attributes)}
+ &lt;li&gt;{@link #removeEnforcedAttribute(String tagName, String attribute)}
+ &lt;li&gt;{@link #removeProtocols(String tagName, String attribute, String... removeProtocols)}
+ &lt;/ul&gt;
+
+ &lt;p&gt;
+ The cleaner and these safelists assume that you want to clean a &lt;code&gt;body&lt;/code&gt; fragment of HTML (to add user
+ supplied HTML into a templated page), and not to clean a full HTML document. If the latter is the case, you could wrap
+ the templated document HTML around the cleaned body HTML.
+ &lt;/p&gt;
+ &lt;p&gt;
+ If you are going to extend a safelist, please be very careful. Make sure you understand what attributes may lead to
+ XSS attack vectors. URL attributes are particularly vulnerable and require careful validation. See 
+ the &lt;a href=&quot;https://owasp.org/www-community/xss-filter-evasion-cheatsheet&quot;&gt;XSS Filter Evasion Cheat Sheet&lt;/a&gt; for some
+ XSS attack examples (that jsoup will safegaurd against the default Cleaner and Safelist configuration).
+ &lt;/p&gt;
+ */
+public class Safelist {
+    private static final String All = &quot;:all&quot;;
+    private final Set&lt;TagName&gt; tagNames; // tags allowed, lower case. e.g. [p, br, span]
+    private final Map&lt;TagName, Set&lt;AttributeKey&gt;&gt; attributes; // tag -&gt; attribute[]. allowed attributes [href] for a tag.
+    private final Map&lt;TagName, Map&lt;AttributeKey, AttributeValue&gt;&gt; enforcedAttributes; // always set these attribute values
+    private final Map&lt;TagName, Map&lt;AttributeKey, Set&lt;Protocol&gt;&gt;&gt; protocols; // allowed URL protocols for attributes
+    private boolean preserveRelativeLinks; // option to preserve relative links
+
+    /**
+     This safelist allows only text nodes: any HTML Element or any Node other than a TextNode will be removed.
+     &lt;p&gt;
+     Note that the output of {@link org.jsoup.Jsoup#clean(String, Safelist)} is still &lt;b&gt;HTML&lt;/b&gt; even when using
+     this Safelist, and so any HTML entities in the output will be appropriately escaped. If you want plain text, not
+     HTML, you should use a text method such as {@link Element#text()} instead, after cleaning the document.
+     &lt;/p&gt;
+     &lt;p&gt;Example:&lt;/p&gt;
+     &lt;pre&gt;{@code
+     String sourceBodyHtml = &quot;&lt;p&gt;5 is &amp;lt; 6.&lt;/p&gt;&quot;;
+     String html = Jsoup.clean(sourceBodyHtml, Safelist.none());
+
+     Cleaner cleaner = new Cleaner(Safelist.none());
+     String text = cleaner.clean(Jsoup.parse(sourceBodyHtml)).text();
+
+     // html is: 5 is &amp;lt; 6.
+     // text is: 5 is &lt; 6.
+     }&lt;/pre&gt;
+
+     @return safelist
+     */
+    public static Safelist none() {
+<span id="H0">        return new Safelist();</span>
+    }
+
+    /**
+     This safelist allows only simple text formatting: &lt;code&gt;b, em, i, strong, u&lt;/code&gt;. All other HTML (tags and
+     attributes) will be removed.
+
+     @return safelist
+     */
+    public static Safelist simpleText() {
+<span id="H2">        return new Safelist()</span>
+<span id="H2">                .addTags(&quot;b&quot;, &quot;em&quot;, &quot;i&quot;, &quot;strong&quot;, &quot;u&quot;)</span>
+                ;
+    }
+
+    /**
+     &lt;p&gt;
+     This safelist allows a fuller range of text nodes: &lt;code&gt;a, b, blockquote, br, cite, code, dd, dl, dt, em, i, li,
+     ol, p, pre, q, small, span, strike, strong, sub, sup, u, ul&lt;/code&gt;, and appropriate attributes.
+     &lt;/p&gt;
+     &lt;p&gt;
+     Links (&lt;code&gt;a&lt;/code&gt; elements) can point to &lt;code&gt;http, https, ftp, mailto&lt;/code&gt;, and have an enforced
+     &lt;code&gt;rel=nofollow&lt;/code&gt; attribute.
+     &lt;/p&gt;
+     &lt;p&gt;
+     Does not allow images.
+     &lt;/p&gt;
+
+     @return safelist
+     */
+    public static Safelist basic() {
+<span id="H2">        return new Safelist()</span>
+<span id="H2">                .addTags(</span>
+                        &quot;a&quot;, &quot;b&quot;, &quot;blockquote&quot;, &quot;br&quot;, &quot;cite&quot;, &quot;code&quot;, &quot;dd&quot;, &quot;dl&quot;, &quot;dt&quot;, &quot;em&quot;,
+                        &quot;i&quot;, &quot;li&quot;, &quot;ol&quot;, &quot;p&quot;, &quot;pre&quot;, &quot;q&quot;, &quot;small&quot;, &quot;span&quot;, &quot;strike&quot;, &quot;strong&quot;, &quot;sub&quot;,
+                        &quot;sup&quot;, &quot;u&quot;, &quot;ul&quot;)
+
+<span id="H2">                .addAttributes(&quot;a&quot;, &quot;href&quot;)</span>
+<span id="H2">                .addAttributes(&quot;blockquote&quot;, &quot;cite&quot;)</span>
+<span id="H2">                .addAttributes(&quot;q&quot;, &quot;cite&quot;)</span>
+
+<span id="H2">                .addProtocols(&quot;a&quot;, &quot;href&quot;, &quot;ftp&quot;, &quot;http&quot;, &quot;https&quot;, &quot;mailto&quot;)</span>
+<span id="H2">                .addProtocols(&quot;blockquote&quot;, &quot;cite&quot;, &quot;http&quot;, &quot;https&quot;)</span>
+<span id="H2">                .addProtocols(&quot;cite&quot;, &quot;cite&quot;, &quot;http&quot;, &quot;https&quot;)</span>
+
+<span id="H2">                .addEnforcedAttribute(&quot;a&quot;, &quot;rel&quot;, &quot;nofollow&quot;)</span>
+                ;
+
+    }
+
+    /**
+     This safelist allows the same text tags as {@link #basic}, and also allows &lt;code&gt;img&lt;/code&gt; tags, with appropriate
+     attributes, with &lt;code&gt;src&lt;/code&gt; pointing to &lt;code&gt;http&lt;/code&gt; or &lt;code&gt;https&lt;/code&gt;.
+
+     @return safelist
+     */
+    public static Safelist basicWithImages() {
+<span id="H4">        return basic()</span>
+<span id="H4">                .addTags(&quot;img&quot;)</span>
+<span id="H4">                .addAttributes(&quot;img&quot;, &quot;align&quot;, &quot;alt&quot;, &quot;height&quot;, &quot;src&quot;, &quot;title&quot;, &quot;width&quot;)</span>
+<span id="H4">                .addProtocols(&quot;img&quot;, &quot;src&quot;, &quot;http&quot;, &quot;https&quot;)</span>
+                ;
+    }
+
+    /**
+     This safelist allows a full range of text and structural body HTML: &lt;code&gt;a, b, blockquote, br, caption, cite,
+     code, col, colgroup, dd, div, dl, dt, em, h1, h2, h3, h4, h5, h6, i, img, li, ol, p, pre, q, small, span, strike, strong, sub,
+     sup, table, tbody, td, tfoot, th, thead, tr, u, ul&lt;/code&gt;
+     &lt;p&gt;
+     Links do not have an enforced &lt;code&gt;rel=nofollow&lt;/code&gt; attribute, but you can add that if desired.
+     &lt;/p&gt;
+
+     @return safelist
+     */
+    public static Safelist relaxed() {
+<span id="H2">        return new Safelist()</span>
+<span id="H2">                .addTags(</span>
+                        &quot;a&quot;, &quot;b&quot;, &quot;blockquote&quot;, &quot;br&quot;, &quot;caption&quot;, &quot;cite&quot;, &quot;code&quot;, &quot;col&quot;,
+                        &quot;colgroup&quot;, &quot;dd&quot;, &quot;div&quot;, &quot;dl&quot;, &quot;dt&quot;, &quot;em&quot;, &quot;h1&quot;, &quot;h2&quot;, &quot;h3&quot;, &quot;h4&quot;, &quot;h5&quot;, &quot;h6&quot;,
+                        &quot;i&quot;, &quot;img&quot;, &quot;li&quot;, &quot;ol&quot;, &quot;p&quot;, &quot;pre&quot;, &quot;q&quot;, &quot;small&quot;, &quot;span&quot;, &quot;strike&quot;, &quot;strong&quot;,
+                        &quot;sub&quot;, &quot;sup&quot;, &quot;table&quot;, &quot;tbody&quot;, &quot;td&quot;, &quot;tfoot&quot;, &quot;th&quot;, &quot;thead&quot;, &quot;tr&quot;, &quot;u&quot;,
+                        &quot;ul&quot;)
+
+<span id="H2">                .addAttributes(&quot;a&quot;, &quot;href&quot;, &quot;title&quot;)</span>
+<span id="H2">                .addAttributes(&quot;blockquote&quot;, &quot;cite&quot;)</span>
+<span id="H2">                .addAttributes(&quot;col&quot;, &quot;span&quot;, &quot;width&quot;)</span>
+<span id="H2">                .addAttributes(&quot;colgroup&quot;, &quot;span&quot;, &quot;width&quot;)</span>
+<span id="H2">                .addAttributes(&quot;img&quot;, &quot;align&quot;, &quot;alt&quot;, &quot;height&quot;, &quot;src&quot;, &quot;title&quot;, &quot;width&quot;)</span>
+<span id="H2">                .addAttributes(&quot;ol&quot;, &quot;start&quot;, &quot;type&quot;)</span>
+<span id="H2">                .addAttributes(&quot;q&quot;, &quot;cite&quot;)</span>
+<span id="H2">                .addAttributes(&quot;table&quot;, &quot;summary&quot;, &quot;width&quot;)</span>
+<span id="H2">                .addAttributes(&quot;td&quot;, &quot;abbr&quot;, &quot;axis&quot;, &quot;colspan&quot;, &quot;rowspan&quot;, &quot;width&quot;)</span>
+<span id="H2">                .addAttributes(</span>
+                        &quot;th&quot;, &quot;abbr&quot;, &quot;axis&quot;, &quot;colspan&quot;, &quot;rowspan&quot;, &quot;scope&quot;,
+                        &quot;width&quot;)
+<span id="H2">                .addAttributes(&quot;ul&quot;, &quot;type&quot;)</span>
+
+<span id="H2">                .addProtocols(&quot;a&quot;, &quot;href&quot;, &quot;ftp&quot;, &quot;http&quot;, &quot;https&quot;, &quot;mailto&quot;)</span>
+<span id="H2">                .addProtocols(&quot;blockquote&quot;, &quot;cite&quot;, &quot;http&quot;, &quot;https&quot;)</span>
+<span id="H2">                .addProtocols(&quot;cite&quot;, &quot;cite&quot;, &quot;http&quot;, &quot;https&quot;)</span>
+<span id="H2">                .addProtocols(&quot;img&quot;, &quot;src&quot;, &quot;http&quot;, &quot;https&quot;)</span>
+<span id="H2">                .addProtocols(&quot;q&quot;, &quot;cite&quot;, &quot;http&quot;, &quot;https&quot;)</span>
+                ;
+    }
+
+    /**
+     Create a new, empty safelist. Generally it will be better to start with a default prepared safelist instead.
+
+     @see #basic()
+     @see #basicWithImages()
+     @see #simpleText()
+     @see #relaxed()
+     */
+<span id="H0">    public Safelist() {</span>
+<span id="H0">        tagNames = new HashSet&lt;&gt;();</span>
+<span id="H0">        attributes = new HashMap&lt;&gt;();</span>
+<span id="H0">        enforcedAttributes = new HashMap&lt;&gt;();</span>
+<span id="H0">        protocols = new HashMap&lt;&gt;();</span>
+<span id="H0">        preserveRelativeLinks = false;</span>
+<span id="H0">    }</span>
+
+    /**
+     Deep copy an existing Safelist to a new Safelist.
+     @param copy the Safelist to copy
+     */
+    public Safelist(Safelist copy) {
+<span id="H0">        this();</span>
+<span id="H0">        tagNames.addAll(copy.tagNames);</span>
+<span id="H0">        for (Map.Entry&lt;TagName, Set&lt;AttributeKey&gt;&gt; copyTagAttributes : copy.attributes.entrySet()) {</span>
+<span id="H0">            attributes.put(copyTagAttributes.getKey(), new HashSet&lt;&gt;(copyTagAttributes.getValue()));</span>
+<span id="H0">        }</span>
+<span id="H0">        for (Map.Entry&lt;TagName, Map&lt;AttributeKey, AttributeValue&gt;&gt; enforcedEntry : copy.enforcedAttributes.entrySet()) {</span>
+<span id="H1">            enforcedAttributes.put(enforcedEntry.getKey(), new HashMap&lt;&gt;(enforcedEntry.getValue()));</span>
+<span id="H1">        }</span>
+<span id="H0">        for (Map.Entry&lt;TagName, Map&lt;AttributeKey, Set&lt;Protocol&gt;&gt;&gt; protocolsEntry : copy.protocols.entrySet()) {</span>
+<span id="H1">            Map&lt;AttributeKey, Set&lt;Protocol&gt;&gt; attributeProtocolsCopy = new HashMap&lt;&gt;();</span>
+<span id="H1">            for (Map.Entry&lt;AttributeKey, Set&lt;Protocol&gt;&gt; attributeProtocols : protocolsEntry.getValue().entrySet()) {</span>
+<span id="H1">                attributeProtocolsCopy.put(attributeProtocols.getKey(), new HashSet&lt;&gt;(attributeProtocols.getValue()));</span>
+<span id="H1">            }</span>
+<span id="H1">            protocols.put(protocolsEntry.getKey(), attributeProtocolsCopy);</span>
+<span id="H1">        }</span>
+<span id="H0">        preserveRelativeLinks = copy.preserveRelativeLinks;</span>
+<span id="H0">    }</span>
+
+    /**
+     Add a list of allowed elements to a safelist. (If a tag is not allowed, it will be removed from the HTML.)
+
+     @param tags tag names to allow
+     @return this (for chaining)
+     */
+    public Safelist addTags(String... tags) {
+<span id="H0">        Validate.notNull(tags);</span>
+
+<span id="H0">        for (String tagName : tags) {</span>
+<span id="H0">            Validate.notEmpty(tagName);</span>
+<span id="H0">            Validate.isFalse(tagName.equalsIgnoreCase(&quot;noscript&quot;),</span>
+                &quot;noscript is unsupported in Safelists, due to incompatibilities between parsers with and without script-mode enabled&quot;);
+<span id="H0">            tagNames.add(TagName.valueOf(tagName));</span>
+        }
+<span id="H0">        return this;</span>
+    }
+
+    /**
+     Remove a list of allowed elements from a safelist. (If a tag is not allowed, it will be removed from the HTML.)
+
+     @param tags tag names to disallow
+     @return this (for chaining)
+     */
+    public Safelist removeTags(String... tags) {
+<span id="H2">        Validate.notNull(tags);</span>
+
+<span id="H2">        for(String tag: tags) {</span>
+<span id="H2">            Validate.notEmpty(tag);</span>
+<span id="H2">            TagName tagName = TagName.valueOf(tag);</span>
+
+<span id="H2">            if(tagNames.remove(tagName)) { // Only look in sub-maps if tag was allowed</span>
+<span id="H2">                attributes.remove(tagName);</span>
+<span id="H2">                enforcedAttributes.remove(tagName);</span>
+<span id="H2">                protocols.remove(tagName);</span>
+            }
+        }
+<span id="H2">        return this;</span>
+    }
+
+    /**
+     Add a list of allowed attributes to a tag. (If an attribute is not allowed on an element, it will be removed.)
+     &lt;p&gt;
+     E.g.: &lt;code&gt;addAttributes(&quot;a&quot;, &quot;href&quot;, &quot;class&quot;)&lt;/code&gt; allows &lt;code&gt;href&lt;/code&gt; and &lt;code&gt;class&lt;/code&gt; attributes
+     on &lt;code&gt;a&lt;/code&gt; tags.
+     &lt;/p&gt;
+     &lt;p&gt;
+     To make an attribute valid for &lt;b&gt;all tags&lt;/b&gt;, use the pseudo tag &lt;code&gt;:all&lt;/code&gt;, e.g.
+     &lt;code&gt;addAttributes(&quot;:all&quot;, &quot;class&quot;)&lt;/code&gt;.
+     &lt;/p&gt;
+
+     @param tag  The tag the attributes are for. The tag will be added to the allowed tag list if necessary.
+     @param attributes List of valid attributes for the tag
+     @return this (for chaining)
+     */
+    public Safelist addAttributes(String tag, String... attributes) {
+<span id="H0">        Validate.notEmpty(tag);</span>
+<span id="H0">        Validate.notNull(attributes);</span>
+<span id="H0">        Validate.isTrue(attributes.length &gt; 0, &quot;No attribute names supplied.&quot;);</span>
+
+<span id="H0">        addTags(tag);</span>
+<span id="H0">        TagName tagName = TagName.valueOf(tag);</span>
+<span id="H0">        Set&lt;AttributeKey&gt; attributeSet = new HashSet&lt;&gt;();</span>
+<span id="H0">        for (String key : attributes) {</span>
+<span id="H0">            Validate.notEmpty(key);</span>
+<span id="H0">            attributeSet.add(AttributeKey.valueOf(key));</span>
+        }
+<span id="H0">        if (this.attributes.containsKey(tagName)) {</span>
+<span id="H0">            Set&lt;AttributeKey&gt; currentSet = this.attributes.get(tagName);</span>
+<span id="H0">            currentSet.addAll(attributeSet);</span>
+<span id="H0">        } else {</span>
+<span id="H0">            this.attributes.put(tagName, attributeSet);</span>
+        }
+<span id="H0">        return this;</span>
+    }
+
+    /**
+     Remove a list of allowed attributes from a tag. (If an attribute is not allowed on an element, it will be removed.)
+     &lt;p&gt;
+     E.g.: &lt;code&gt;removeAttributes(&quot;a&quot;, &quot;href&quot;, &quot;class&quot;)&lt;/code&gt; disallows &lt;code&gt;href&lt;/code&gt; and &lt;code&gt;class&lt;/code&gt;
+     attributes on &lt;code&gt;a&lt;/code&gt; tags.
+     &lt;/p&gt;
+     &lt;p&gt;
+     To make an attribute invalid for &lt;b&gt;all tags&lt;/b&gt;, use the pseudo tag &lt;code&gt;:all&lt;/code&gt;, e.g.
+     &lt;code&gt;removeAttributes(&quot;:all&quot;, &quot;class&quot;)&lt;/code&gt;.
+     &lt;/p&gt;
+
+     @param tag  The tag the attributes are for.
+     @param attributes List of invalid attributes for the tag
+     @return this (for chaining)
+     */
+    public Safelist removeAttributes(String tag, String... attributes) {
+<span id="H2">        Validate.notEmpty(tag);</span>
+<span id="H2">        Validate.notNull(attributes);</span>
+<span id="H2">        Validate.isTrue(attributes.length &gt; 0, &quot;No attribute names supplied.&quot;);</span>
+
+<span id="H2">        TagName tagName = TagName.valueOf(tag);</span>
+<span id="H2">        Set&lt;AttributeKey&gt; attributeSet = new HashSet&lt;&gt;();</span>
+<span id="H2">        for (String key : attributes) {</span>
+<span id="H2">            Validate.notEmpty(key);</span>
+<span id="H2">            attributeSet.add(AttributeKey.valueOf(key));</span>
+        }
+<span id="H2">        if(tagNames.contains(tagName) &amp;&amp; this.attributes.containsKey(tagName)) { // Only look in sub-maps if tag was allowed</span>
+<span id="H2">            Set&lt;AttributeKey&gt; currentSet = this.attributes.get(tagName);</span>
+<span id="H2">            currentSet.removeAll(attributeSet);</span>
+
+<span id="H2">            if(currentSet.isEmpty()) // Remove tag from attribute map if no attributes are allowed for tag</span>
+<span id="H2">                this.attributes.remove(tagName);</span>
+        }
+<span id="H2">        if(tag.equals(All)) { // Attribute needs to be removed from all individually set tags</span>
+<span id="H4">            Iterator&lt;Map.Entry&lt;TagName, Set&lt;AttributeKey&gt;&gt;&gt; it = this.attributes.entrySet().iterator();</span>
+<span id="H4">            while (it.hasNext()) {</span>
+<span id="H4">                Map.Entry&lt;TagName, Set&lt;AttributeKey&gt;&gt; entry = it.next();</span>
+<span id="H4">                Set&lt;AttributeKey&gt; currentSet = entry.getValue();</span>
+<span id="H4">                currentSet.removeAll(attributeSet);</span>
+<span id="H4">                if(currentSet.isEmpty()) // Remove tag from attribute map if no attributes are allowed for tag</span>
+<span id="H4">                    it.remove();</span>
+<span id="H4">            }</span>
+        }
+<span id="H2">        return this;</span>
+    }
+
+    /**
+     Add an enforced attribute to a tag. An enforced attribute will always be added to the element. If the element
+     already has the attribute set, it will be overridden with this value.
+     &lt;p&gt;
+     E.g.: &lt;code&gt;addEnforcedAttribute(&quot;a&quot;, &quot;rel&quot;, &quot;nofollow&quot;)&lt;/code&gt; will make all &lt;code&gt;a&lt;/code&gt; tags output as
+     &lt;code&gt;&amp;lt;a href=&quot;...&quot; rel=&quot;nofollow&quot;&amp;gt;&lt;/code&gt;
+     &lt;/p&gt;
+
+     @param tag   The tag the enforced attribute is for. The tag will be added to the allowed tag list if necessary.
+     @param attribute   The attribute name
+     @param value The enforced attribute value
+     @return this (for chaining)
+     */
+    public Safelist addEnforcedAttribute(String tag, String attribute, String value) {
+<span id="H1">        Validate.notEmpty(tag);</span>
+<span id="H1">        Validate.notEmpty(attribute);</span>
+<span id="H1">        Validate.notEmpty(value);</span>
+
+<span id="H1">        TagName tagName = TagName.valueOf(tag);</span>
+<span id="H1">        tagNames.add(tagName);</span>
+<span id="H1">        AttributeKey attrKey = AttributeKey.valueOf(attribute);</span>
+<span id="H1">        AttributeValue attrVal = AttributeValue.valueOf(value);</span>
+
+<span id="H1">        if (enforcedAttributes.containsKey(tagName)) {</span>
+<span id="H1">            enforcedAttributes.get(tagName).put(attrKey, attrVal);</span>
+        } else {
+<span id="H1">            Map&lt;AttributeKey, AttributeValue&gt; attrMap = new HashMap&lt;&gt;();</span>
+<span id="H1">            attrMap.put(attrKey, attrVal);</span>
+<span id="H1">            enforcedAttributes.put(tagName, attrMap);</span>
+        }
+<span id="H1">        return this;</span>
+    }
+
+    /**
+     Remove a previously configured enforced attribute from a tag.
+
+     @param tag   The tag the enforced attribute is for.
+     @param attribute   The attribute name
+     @return this (for chaining)
+     */
+    public Safelist removeEnforcedAttribute(String tag, String attribute) {
+<span id="H4">        Validate.notEmpty(tag);</span>
+<span id="H4">        Validate.notEmpty(attribute);</span>
+
+<span id="H4">        TagName tagName = TagName.valueOf(tag);</span>
+<span id="H4">        if(tagNames.contains(tagName) &amp;&amp; enforcedAttributes.containsKey(tagName)) {</span>
+<span id="H4">            AttributeKey attrKey = AttributeKey.valueOf(attribute);</span>
+<span id="H4">            Map&lt;AttributeKey, AttributeValue&gt; attrMap = enforcedAttributes.get(tagName);</span>
+<span id="H4">            attrMap.remove(attrKey);</span>
+
+<span id="H4">            if(attrMap.isEmpty()) // Remove tag from enforced attribute map if no enforced attributes are present</span>
+<span id="H4">                enforcedAttributes.remove(tagName);</span>
+        }
+<span id="H4">        return this;</span>
+    }
+
+    /**
+     * Configure this Safelist to preserve relative links in an element&#x27;s URL attribute, or convert them to absolute
+     * links. By default, this is &lt;b&gt;false&lt;/b&gt;: URLs will be  made absolute (e.g. start with an allowed protocol, like
+     * e.g. {@code http://}.
+     * &lt;p&gt;
+     * Note that when handling relative links, the input document must have an appropriate {@code base URI} set when
+     * parsing, so that the link&#x27;s protocol can be confirmed. Regardless of the setting of the {@code preserve relative
+     * links} option, the link must be resolvable against the base URI to an allowed protocol; otherwise the attribute
+     * will be removed.
+     * &lt;/p&gt;
+     *
+     * @param preserve {@code true} to allow relative links, {@code false} (default) to deny
+     * @return this Safelist, for chaining.
+     * @see #addProtocols
+     */
+    public Safelist preserveRelativeLinks(boolean preserve) {
+<span id="H4">        preserveRelativeLinks = preserve;</span>
+<span id="H4">        return this;</span>
+    }
+
+    /**
+     Add allowed URL protocols for an element&#x27;s URL attribute. This restricts the possible values of the attribute to
+     URLs with the defined protocol.
+     &lt;p&gt;
+     E.g.: &lt;code&gt;addProtocols(&quot;a&quot;, &quot;href&quot;, &quot;ftp&quot;, &quot;http&quot;, &quot;https&quot;)&lt;/code&gt;
+     &lt;/p&gt;
+     &lt;p&gt;
+     To allow a link to an in-page URL anchor (i.e. &lt;code&gt;&amp;lt;a href=&quot;#anchor&quot;&amp;gt;&lt;/code&gt;, add a &lt;code&gt;#&lt;/code&gt;:&lt;br&gt;
+     E.g.: &lt;code&gt;addProtocols(&quot;a&quot;, &quot;href&quot;, &quot;#&quot;)&lt;/code&gt;
+     &lt;/p&gt;
+
+     @param tag       Tag the URL protocol is for
+     @param attribute       Attribute name
+     @param protocols List of valid protocols
+     @return this, for chaining
+     */
+    public Safelist addProtocols(String tag, String attribute, String... protocols) {
+<span id="H1">        Validate.notEmpty(tag);</span>
+<span id="H1">        Validate.notEmpty(attribute);</span>
+<span id="H1">        Validate.notNull(protocols);</span>
+
+<span id="H1">        TagName tagName = TagName.valueOf(tag);</span>
+<span id="H1">        AttributeKey attrKey = AttributeKey.valueOf(attribute);</span>
+        Map&lt;AttributeKey, Set&lt;Protocol&gt;&gt; attrMap;
+        Set&lt;Protocol&gt; protSet;
+
+<span id="H1">        if (this.protocols.containsKey(tagName)) {</span>
+<span id="H1">            attrMap = this.protocols.get(tagName);</span>
+        } else {
+<span id="H1">            attrMap = new HashMap&lt;&gt;();</span>
+<span id="H1">            this.protocols.put(tagName, attrMap);</span>
+        }
+<span id="H1">        if (attrMap.containsKey(attrKey)) {</span>
+<span id="H1">            protSet = attrMap.get(attrKey);</span>
+        } else {
+<span id="H1">            protSet = new HashSet&lt;&gt;();</span>
+<span id="H1">            attrMap.put(attrKey, protSet);</span>
+        }
+<span id="H1">        for (String protocol : protocols) {</span>
+<span id="H1">            Validate.notEmpty(protocol);</span>
+<span id="H1">            Protocol prot = Protocol.valueOf(protocol);</span>
+<span id="H1">            protSet.add(prot);</span>
+        }
+<span id="H1">        return this;</span>
+    }
+
+    /**
+     Remove allowed URL protocols for an element&#x27;s URL attribute. If you remove all protocols for an attribute, that
+     attribute will allow any protocol.
+     &lt;p&gt;
+     E.g.: &lt;code&gt;removeProtocols(&quot;a&quot;, &quot;href&quot;, &quot;ftp&quot;)&lt;/code&gt;
+     &lt;/p&gt;
+
+     @param tag Tag the URL protocol is for
+     @param attribute Attribute name
+     @param removeProtocols List of invalid protocols
+     @return this, for chaining
+     */
+    public Safelist removeProtocols(String tag, String attribute, String... removeProtocols) {
+<span id="H0">        Validate.notEmpty(tag);</span>
+<span id="H0">        Validate.notEmpty(attribute);</span>
+<span id="H0">        Validate.notNull(removeProtocols);</span>
+
+<span id="H0">        TagName tagName = TagName.valueOf(tag);</span>
+<span id="H0">        AttributeKey attr = AttributeKey.valueOf(attribute);</span>
+
+        // make sure that what we&#x27;re removing actually exists; otherwise can open the tag to any data and that can
+        // be surprising
+<span id="H4">        Validate.isTrue(protocols.containsKey(tagName), &quot;Cannot remove a protocol that is not set.&quot;);</span>
+<span id="H4">        Map&lt;AttributeKey, Set&lt;Protocol&gt;&gt; tagProtocols = protocols.get(tagName);</span>
+<span id="H4">        Validate.isTrue(tagProtocols.containsKey(attr), &quot;Cannot remove a protocol that is not set.&quot;);</span>
+
+<span id="H4">        Set&lt;Protocol&gt; attrProtocols = tagProtocols.get(attr);</span>
+<span id="H4">        for (String protocol : removeProtocols) {</span>
+<span id="H4">            Validate.notEmpty(protocol);</span>
+<span id="H4">            attrProtocols.remove(Protocol.valueOf(protocol));</span>
+        }
+
+<span id="H4">        if (attrProtocols.isEmpty()) { // Remove protocol set if empty</span>
+<span id="H4">            tagProtocols.remove(attr);</span>
+<span id="H4">            if (tagProtocols.isEmpty()) // Remove entry for tag if empty</span>
+<span id="H4">                protocols.remove(tagName);</span>
+        }
+<span id="H4">        return this;</span>
+    }
+
+    /**
+     * Test if the supplied tag is allowed by this safelist.
+     * @param tag test tag
+     * @return true if allowed
+     */
+    public boolean isSafeTag(String tag) {
+<span id="H0">        return tagNames.contains(TagName.valueOf(tag));</span>
+    }
+
+    /**
+     * Test if the supplied attribute is allowed by this safelist for this tag.
+     * @param tagName tag to consider allowing the attribute in
+     * @param el element under test, to confirm protocol
+     * @param attr attribute under test
+     * @return true if allowed
+     */
+    public boolean isSafeAttribute(String tagName, Element el, Attribute attr) {
+<span id="H0">        TagName tag = TagName.valueOf(tagName);</span>
+<span id="H0">        AttributeKey key = AttributeKey.valueOf(attr.getKey());</span>
+
+<span id="H0">        Set&lt;AttributeKey&gt; okSet = attributes.get(tag);</span>
+<span id="H0">        if (okSet != null &amp;&amp; okSet.contains(key)) {</span>
+<span id="H1">            if (protocols.containsKey(tag)) {</span>
+<span id="H1">                Map&lt;AttributeKey, Set&lt;Protocol&gt;&gt; attrProts = protocols.get(tag);</span>
+                // ok if not defined protocol; otherwise test
+<span id="H1">                return !attrProts.containsKey(key) || testValidProtocol(el, attr, attrProts.get(key));</span>
+            } else { // attribute found, no protocols defined, so OK
+<span id="H4">                return true;</span>
+            }
+        }
+        // might be an enforced attribute?
+<span id="H0">        Map&lt;AttributeKey, AttributeValue&gt; enforcedSet = enforcedAttributes.get(tag);</span>
+<span id="H0">        if (enforcedSet != null) {</span>
+<span id="H4">            Attributes expect = getEnforcedAttributes(tagName);</span>
+<span id="H4">            String attrKey = attr.getKey();</span>
+<span id="H4">            if (expect.hasKeyIgnoreCase(attrKey)) {</span>
+<span id="H4">                return expect.getIgnoreCase(attrKey).equals(attr.getValue());</span>
+            }
+        }
+        // no attributes defined for tag, try :all tag
+<span id="H0">        return !tagName.equals(All) &amp;&amp; isSafeAttribute(All, el, attr);</span>
+    }
+
+    private boolean testValidProtocol(Element el, Attribute attr, Set&lt;Protocol&gt; protocols) {
+        // try to resolve relative urls to abs, and optionally update the attribute so output html has abs.
+        // rels without a baseuri get removed
+<span id="H1">        String value = el.absUrl(attr.getKey());</span>
+<span id="H1">        if (value.length() == 0)</span>
+<span id="H4">            value = attr.getValue(); // if it could not be made abs, run as-is to allow custom unknown protocols</span>
+<span id="H1">        if (!preserveRelativeLinks)</span>
+<span id="H1">            attr.setValue(value);</span>
+        
+<span id="H1">        for (Protocol protocol : protocols) {</span>
+<span id="H1">            String prot = protocol.toString();</span>
+
+<span id="H1">            if (prot.equals(&quot;#&quot;)) { // allows anchor links</span>
+<span id="H4">                if (isValidAnchor(value)) {</span>
+<span id="H4">                    return true;</span>
+                } else {
+                    continue;
+                }
+            }
+
+<span id="H1">            prot += &quot;:&quot;;</span>
+
+<span id="H1">            if (lowerCase(value).startsWith(prot)) {</span>
+<span id="H4">                return true;</span>
+            }
+<span id="H1">        }</span>
+<span id="H1">        return false;</span>
+    }
+
+    private boolean isValidAnchor(String value) {
+<span id="H4">        return value.startsWith(&quot;#&quot;) &amp;&amp; !value.matches(&quot;.*\\s.*&quot;);</span>
+    }
+
+    /**
+     Gets the Attributes that should be enforced for a given tag
+     * @param tagName the tag
+     * @return the attributes that will be enforced; empty if none are set for the given tag
+     */
+    public Attributes getEnforcedAttributes(String tagName) {
+<span id="H1">        Attributes attrs = new Attributes();</span>
+<span id="H1">        TagName tag = TagName.valueOf(tagName);</span>
+<span id="H1">        if (enforcedAttributes.containsKey(tag)) {</span>
+<span id="H1">            Map&lt;AttributeKey, AttributeValue&gt; keyVals = enforcedAttributes.get(tag);</span>
+<span id="H1">            for (Map.Entry&lt;AttributeKey, AttributeValue&gt; entry : keyVals.entrySet()) {</span>
+<span id="H1">                attrs.put(entry.getKey().toString(), entry.getValue().toString());</span>
+<span id="H1">            }</span>
+        }
+<span id="H1">        return attrs;</span>
+    }
+    
+    // named types for config. All just hold strings, but here for my sanity.
+
+    static class TagName extends TypedValue {
+        TagName(String value) {
+<span id="H0">            super(value);</span>
+<span id="H0">        }</span>
+
+        static TagName valueOf(String value) {
+<span id="H0">            return new TagName(Normalizer.lowerCase(value));</span>
+        }
+    }
+
+    static class AttributeKey extends TypedValue {
+        AttributeKey(String value) {
+<span id="H0">            super(value);</span>
+<span id="H0">        }</span>
+
+        static AttributeKey valueOf(String value) {
+<span id="H0">            return new AttributeKey(Normalizer.lowerCase(value));</span>
+        }
+    }
+
+    static class AttributeValue extends TypedValue {
+        AttributeValue(String value) {
+<span id="H1">            super(value);</span>
+<span id="H1">        }</span>
+
+        static AttributeValue valueOf(String value) {
+<span id="H1">            return new AttributeValue(value);</span>
+        }
+    }
+
+    static class Protocol extends TypedValue {
+        Protocol(String value) {
+<span id="H1">            super(value);</span>
+<span id="H1">        }</span>
+
+        static Protocol valueOf(String value) {
+<span id="H1">            return new Protocol(value);</span>
+        }
+    }
+
+    abstract static class TypedValue {
+        private final String value;
+
+<span id="H0">        TypedValue(String value) {</span>
+<span id="H0">            Validate.notNull(value);</span>
+<span id="H0">            this.value = value;</span>
+<span id="H0">        }</span>
+
+        @Override
+        public int hashCode() {
+<span id="H0">            final int prime = 31;</span>
+<span id="H0">            int result = 1;</span>
+<span id="H0">            result = prime * result + ((value == null) ? 0 : value.hashCode());</span>
+<span id="H0">            return result;</span>
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+<span id="H0">            if (this == obj) return true;</span>
+<span id="H0">            if (obj == null) return false;</span>
+<span id="H0">            if (getClass() != obj.getClass()) return false;</span>
+<span id="H0">            TypedValue other = (TypedValue) obj;</span>
+<span id="H0">            if (value == null) {</span>
+                return other.value == null;
+<span id="H0">            } else return value.equals(other.value);</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H1">            return value;</span>
+        }
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

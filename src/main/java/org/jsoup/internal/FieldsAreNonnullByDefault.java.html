@@ -1,0 +1,34 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/internal/FieldsAreNonnullByDefault.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">internal</a>/FieldsAreNonnullByDefault.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.internal;
+
+import org.jspecify.annotations.NullMarked;
+
+import java.lang.annotation.Documented;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+
+/**
+ @deprecated Previously indicated that fields types are not nullable, unless otherwise specified by @Nullable.
+ */
+@Deprecated
+@Documented
+@NullMarked
+@Retention(value = RetentionPolicy.CLASS)
+public @interface FieldsAreNonnullByDefault {
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

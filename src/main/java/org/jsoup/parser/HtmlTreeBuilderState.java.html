@@ -1,0 +1,1929 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/parser/HtmlTreeBuilderState.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">parser</a>/HtmlTreeBuilderState.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.parser;
+
+import org.jsoup.helper.Validate;
+import org.jsoup.internal.StringUtil;
+import org.jsoup.nodes.Attribute;
+import org.jsoup.nodes.Attributes;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.DocumentType;
+import org.jsoup.nodes.Element;
+
+import java.util.ArrayList;
+
+import static org.jsoup.internal.StringUtil.inSorted;
+import static org.jsoup.parser.HtmlTreeBuilderState.Constants.*;
+
+/**
+ * The Tree Builder&#x27;s current state. Each state embodies the processing for the state, and transitions to other states.
+ */
+<span id="H1">enum HtmlTreeBuilderState {</span>
+<span id="H1">    Initial {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            if (isWhitespace(t)) {</span>
+<span id="H2">                return true; // ignore whitespace until we get the first content</span>
+<span id="H1">            } else if (t.isComment()) {</span>
+<span id="H1">                tb.insertCommentNode(t.asComment());</span>
+<span id="H1">            } else if (t.isDoctype()) {</span>
+                // todo: parse error check on expected doctypes
+                // todo: quirk state check on doctype ids
+<span id="H2">                Token.Doctype d = t.asDoctype();</span>
+<span id="H2">                DocumentType doctype = new DocumentType(</span>
+<span id="H2">                    tb.settings.normalizeTag(d.getName()), d.getPublicIdentifier(), d.getSystemIdentifier());</span>
+<span id="H2">                doctype.setPubSysKey(d.getPubSysKey());</span>
+<span id="H2">                tb.getDocument().appendChild(doctype);</span>
+<span id="H2">                tb.onNodeInserted(doctype);</span>
+<span id="H2">                if (d.isForceQuirks())</span>
+<span id="H2">                    tb.getDocument().quirksMode(Document.QuirksMode.quirks);</span>
+<span id="H2">                tb.transition(BeforeHtml);</span>
+<span id="H2">            } else {</span>
+                // todo: check not iframe srcdoc
+<span id="H1">                tb.transition(BeforeHtml);</span>
+<span id="H1">                return tb.process(t); // re-process token</span>
+            }
+<span id="H1">            return true;</span>
+        }
+    },
+<span id="H1">    BeforeHtml {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            if (t.isDoctype()) {</span>
+<span id="H2">                tb.error(this);</span>
+<span id="H2">                return false;</span>
+<span id="H1">            } else if (t.isComment()) {</span>
+<span id="H2">                tb.insertCommentNode(t.asComment());</span>
+<span id="H1">            } else if (isWhitespace(t)) {</span>
+<span id="H2">                tb.insertCharacterNode(t.asCharacter()); // out of spec - include whitespace</span>
+<span id="H1">            } else if (t.isStartTag() &amp;&amp; t.asStartTag().normalName().equals(&quot;html&quot;)) {</span>
+<span id="H1">                tb.insertElementFor(t.asStartTag());</span>
+<span id="H1">                tb.transition(BeforeHead);</span>
+<span id="H1">            } else if (t.isEndTag() &amp;&amp; (inSorted(t.asEndTag().normalName(), BeforeHtmlToHead))) {</span>
+                return anythingElse(t, tb);
+<span id="H1">            } else if (t.isEndTag()) {</span>
+<span id="H2">                tb.error(this);</span>
+<span id="H2">                return false;</span>
+            } else {
+<span id="H1">                return anythingElse(t, tb);</span>
+            }
+<span id="H1">            return true;</span>
+        }
+
+        private boolean anythingElse(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            tb.processStartTag(&quot;html&quot;);</span>
+<span id="H1">            tb.transition(BeforeHead);</span>
+<span id="H1">            return tb.process(t);</span>
+        }
+    },
+<span id="H1">    BeforeHead {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            if (isWhitespace(t)) {</span>
+<span id="H2">                tb.insertCharacterNode(t.asCharacter()); // out of spec - include whitespace</span>
+<span id="H1">            } else if (t.isComment()) {</span>
+<span id="H2">                tb.insertCommentNode(t.asComment());</span>
+<span id="H1">            } else if (t.isDoctype()) {</span>
+                tb.error(this);
+                return false;
+<span id="H1">            } else if (t.isStartTag() &amp;&amp; t.asStartTag().normalName().equals(&quot;html&quot;)) {</span>
+                return InBody.process(t, tb); // does not transition
+<span id="H1">            } else if (t.isStartTag() &amp;&amp; t.asStartTag().normalName().equals(&quot;head&quot;)) {</span>
+<span id="H1">                Element head = tb.insertElementFor(t.asStartTag());</span>
+<span id="H1">                tb.setHeadElement(head);</span>
+<span id="H1">                tb.transition(InHead);</span>
+<span id="H1">            } else if (t.isEndTag() &amp;&amp; (inSorted(t.asEndTag().normalName(), BeforeHtmlToHead))) {</span>
+                tb.processStartTag(&quot;head&quot;);
+                return tb.process(t);
+<span id="H1">            } else if (t.isEndTag()) {</span>
+                tb.error(this);
+                return false;
+            } else {
+<span id="H1">                tb.processStartTag(&quot;head&quot;);</span>
+<span id="H1">                return tb.process(t);</span>
+            }
+<span id="H1">            return true;</span>
+        }
+    },
+<span id="H1">    InHead {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            if (isWhitespace(t)) {</span>
+<span id="H2">                tb.insertCharacterNode(t.asCharacter()); // out of spec - include whitespace</span>
+<span id="H2">                return true;</span>
+            }
+<span id="H1">            switch (t.type) {</span>
+                case Comment:
+<span id="H2">                    tb.insertCommentNode(t.asComment());</span>
+<span id="H2">                    break;</span>
+                case Doctype:
+                    tb.error(this);
+                    return false;
+                case StartTag:
+<span id="H1">                    Token.StartTag start = t.asStartTag();</span>
+<span id="H1">                    String name = start.normalName();</span>
+<span id="H1">                    if (name.equals(&quot;html&quot;)) {</span>
+                        return InBody.process(t, tb);
+<span id="H1">                    } else if (inSorted(name, InHeadEmpty)) {</span>
+<span id="H2">                        Element el = tb.insertEmptyElementFor(start);</span>
+                        // jsoup special: update base the first time it is seen
+<span id="H2">                        if (name.equals(&quot;base&quot;) &amp;&amp; el.hasAttr(&quot;href&quot;))</span>
+<span id="H2">                            tb.maybeSetBaseUri(el);</span>
+<span id="H1">                    } else if (name.equals(&quot;meta&quot;)) {</span>
+<span id="H2">                        tb.insertEmptyElementFor(start);</span>
+                        // todo: charset switches
+<span id="H1">                    } else if (name.equals(&quot;title&quot;)) {</span>
+<span id="H1">                        handleRcData(start, tb);</span>
+<span id="H1">                    } else if (inSorted(name, InHeadRaw)) {</span>
+<span id="H2">                        handleRawtext(start, tb);</span>
+<span id="H1">                    } else if (name.equals(&quot;noscript&quot;)) {</span>
+                        // else if noscript &amp;&amp; scripting flag = true: rawtext (jsoup doesn&#x27;t run script, to handle as noscript)
+<span id="H1">                        tb.insertElementFor(start);</span>
+<span id="H1">                        tb.transition(InHeadNoscript);</span>
+<span id="H1">                    } else if (name.equals(&quot;script&quot;)) {</span>
+                        // skips some script rules as won&#x27;t execute them
+<span id="H1">                        tb.tokeniser.transition(TokeniserState.ScriptData);</span>
+<span id="H1">                        tb.markInsertionMode();</span>
+<span id="H1">                        tb.transition(Text);</span>
+<span id="H1">                        tb.insertElementFor(start);</span>
+<span id="H1">                    } else if (name.equals(&quot;head&quot;)) {</span>
+                        tb.error(this);
+                        return false;
+<span id="H1">                    } else if (name.equals(&quot;template&quot;)) {</span>
+<span id="H2">                        tb.insertElementFor(start);</span>
+<span id="H2">                        tb.insertMarkerToFormattingElements();</span>
+<span id="H2">                        tb.framesetOk(false);</span>
+<span id="H2">                        tb.transition(InTemplate);</span>
+<span id="H2">                        tb.pushTemplateMode(InTemplate);</span>
+                    } else {
+<span id="H1">                        return anythingElse(t, tb);</span>
+                    }
+                    break;
+                case EndTag:
+<span id="H1">                    Token.EndTag end = t.asEndTag();</span>
+<span id="H1">                    name = end.normalName();</span>
+<span id="H1">                    if (name.equals(&quot;head&quot;)) {</span>
+<span id="H1">                        tb.pop();</span>
+<span id="H1">                        tb.transition(AfterHead);</span>
+<span id="H2">                    } else if (inSorted(name, Constants.InHeadEnd)) {</span>
+                        return anythingElse(t, tb);
+<span id="H2">                    } else if (name.equals(&quot;template&quot;)) {</span>
+<span id="H2">                        if (!tb.onStack(name)) {</span>
+                            tb.error(this);
+                        } else {
+<span id="H2">                            tb.generateImpliedEndTags(true);</span>
+<span id="H2">                            if (!tb.currentElementIs(name)) tb.error(this);</span>
+<span id="H2">                            tb.popStackToClose(name);</span>
+<span id="H2">                            tb.clearFormattingElementsToLastMarker();</span>
+<span id="H2">                            tb.popTemplateMode();</span>
+<span id="H2">                            tb.resetInsertionMode();</span>
+                        }
+                    }
+                    else {
+                        tb.error(this);
+                        return false;
+                    }
+                    break;
+                default:
+<span id="H1">                    return anythingElse(t, tb);</span>
+            }
+<span id="H1">            return true;</span>
+        }
+
+        private boolean anythingElse(Token t, TreeBuilder tb) {
+<span id="H1">            tb.processEndTag(&quot;head&quot;);</span>
+<span id="H1">            return tb.process(t);</span>
+        }
+    },
+<span id="H1">    InHeadNoscript {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            if (t.isDoctype()) {</span>
+                tb.error(this);
+<span id="H1">            } else if (t.isStartTag() &amp;&amp; t.asStartTag().normalName().equals(&quot;html&quot;)) {</span>
+                return tb.process(t, InBody);
+<span id="H1">            } else if (t.isEndTag() &amp;&amp; t.asEndTag().normalName().equals(&quot;noscript&quot;)) {</span>
+<span id="H1">                tb.pop();</span>
+<span id="H1">                tb.transition(InHead);</span>
+<span id="H2">            } else if (isWhitespace(t) || t.isComment() || (t.isStartTag() &amp;&amp; inSorted(t.asStartTag().normalName(),</span>
+                    InHeadNoScriptHead))) {
+                return tb.process(t, InHead);
+<span id="H2">            } else if (t.isEndTag() &amp;&amp; t.asEndTag().normalName().equals(&quot;br&quot;)) {</span>
+                return anythingElse(t, tb);
+<span id="H2">            } else if ((t.isStartTag() &amp;&amp; inSorted(t.asStartTag().normalName(), InHeadNoscriptIgnore)) || t.isEndTag()) {</span>
+<span id="H2">                tb.error(this);</span>
+<span id="H2">                return false;</span>
+            } else {
+<span id="H2">                return anythingElse(t, tb);</span>
+            }
+<span id="H1">            return true;</span>
+        }
+
+        private boolean anythingElse(Token t, HtmlTreeBuilder tb) {
+            // note that this deviates from spec, which is to pop out of noscript and reprocess in head:
+            // https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inheadnoscript
+            // allows content to be inserted as data
+<span id="H2">            tb.error(this);</span>
+<span id="H2">            tb.insertCharacterNode(new Token.Character().data(t.toString()));</span>
+<span id="H2">            return true;</span>
+        }
+    },
+<span id="H1">    AfterHead {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            if (isWhitespace(t)) {</span>
+<span id="H2">                tb.insertCharacterNode(t.asCharacter());</span>
+<span id="H1">            } else if (t.isComment()) {</span>
+                tb.insertCommentNode(t.asComment());
+<span id="H1">            } else if (t.isDoctype()) {</span>
+                tb.error(this);
+<span id="H1">            } else if (t.isStartTag()) {</span>
+<span id="H1">                Token.StartTag startTag = t.asStartTag();</span>
+<span id="H1">                String name = startTag.normalName();</span>
+<span id="H1">                if (name.equals(&quot;html&quot;)) {</span>
+                    return tb.process(t, InBody);
+<span id="H1">                } else if (name.equals(&quot;body&quot;)) {</span>
+<span id="H1">                    tb.insertElementFor(startTag);</span>
+<span id="H1">                    tb.framesetOk(false);</span>
+<span id="H1">                    tb.transition(InBody);</span>
+<span id="H1">                } else if (name.equals(&quot;frameset&quot;)) {</span>
+<span id="H1">                    tb.insertElementFor(startTag);</span>
+<span id="H1">                    tb.transition(InFrameset);</span>
+<span id="H1">                } else if (inSorted(name, InBodyStartToHead)) {</span>
+<span id="H2">                    tb.error(this);</span>
+<span id="H2">                    Element head = tb.getHeadElement();</span>
+<span id="H2">                    tb.push(head);</span>
+<span id="H2">                    tb.process(t, InHead);</span>
+<span id="H2">                    tb.removeFromStack(head);</span>
+<span id="H1">                } else if (name.equals(&quot;head&quot;)) {</span>
+                    tb.error(this);
+                    return false;
+                } else {
+<span id="H1">                    anythingElse(t, tb);</span>
+                }
+<span id="H1">            } else if (t.isEndTag()) {</span>
+<span id="H2">                String name = t.asEndTag().normalName();</span>
+<span id="H2">                if (inSorted(name, AfterHeadBody)) {</span>
+<span id="H2">                    anythingElse(t, tb);</span>
+                } else if (name.equals(&quot;template&quot;)) {
+                    tb.process(t, InHead);
+                }
+                else {
+                    tb.error(this);
+                    return false;
+                }
+<span id="H2">            } else {</span>
+<span id="H1">                anythingElse(t, tb);</span>
+            }
+<span id="H1">            return true;</span>
+        }
+
+        private boolean anythingElse(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            tb.processStartTag(&quot;body&quot;);</span>
+<span id="H1">            tb.framesetOk(true);</span>
+<span id="H1">            return tb.process(t);</span>
+        }
+    },
+<span id="H1">    InBody {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            switch (t.type) {</span>
+                case Character: {
+<span id="H1">                    Token.Character c = t.asCharacter();</span>
+<span id="H1">                    if (c.getData().equals(nullString)) {</span>
+                        // todo confirm that check
+                        tb.error(this);
+                        return false;
+<span id="H1">                    } else if (tb.framesetOk() &amp;&amp; isWhitespace(c)) { // don&#x27;t check if whitespace if frames already closed</span>
+<span id="H2">                        tb.reconstructFormattingElements();</span>
+<span id="H2">                        tb.insertCharacterNode(c);</span>
+                    } else {
+<span id="H1">                        tb.reconstructFormattingElements();</span>
+<span id="H1">                        tb.insertCharacterNode(c);</span>
+<span id="H1">                        tb.framesetOk(false);</span>
+                    }
+<span id="H1">                    break;</span>
+                }
+                case Comment: {
+<span id="H2">                    tb.insertCommentNode(t.asComment());</span>
+<span id="H2">                    break;</span>
+                }
+                case Doctype: {
+<span id="H2">                    tb.error(this);</span>
+<span id="H2">                    return false;</span>
+                }
+                case StartTag:
+<span id="H1">                    return inBodyStartTag(t, tb);</span>
+                case EndTag:
+<span id="H1">                    return inBodyEndTag(t, tb);</span>
+                case EOF:
+<span id="H1">                    if (tb.templateModeSize() &gt; 0)</span>
+<span id="H2">                        return tb.process(t, InTemplate);</span>
+<span id="H1">                    if (tb.onStackNot(InBodyEndOtherErrors))</span>
+<span id="H1">                        tb.error(this);</span>
+                    // stop parsing
+                    break;
+            }
+<span id="H1">            return true;</span>
+        }
+
+        private boolean inBodyStartTag(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            final Token.StartTag startTag = t.asStartTag();</span>
+<span id="H1">            final String name = startTag.normalName();</span>
+            final ArrayList&lt;Element&gt; stack;
+            Element el;
+
+<span id="H1">            switch (name) {</span>
+                case &quot;a&quot;:
+<span id="H1">                    if (tb.getActiveFormattingElement(&quot;a&quot;) != null) {</span>
+<span id="H2">                        tb.error(this);</span>
+<span id="H2">                        tb.processEndTag(&quot;a&quot;);</span>
+
+                        // still on stack?
+<span id="H2">                        Element remainingA = tb.getFromStack(&quot;a&quot;);</span>
+<span id="H2">                        if (remainingA != null) {</span>
+                            tb.removeFromActiveFormattingElements(remainingA);
+                            tb.removeFromStack(remainingA);
+                        }
+                    }
+<span id="H1">                    tb.reconstructFormattingElements();</span>
+<span id="H1">                    el = tb.insertElementFor(startTag);</span>
+<span id="H1">                    tb.pushActiveFormattingElements(el);</span>
+<span id="H1">                    break;</span>
+                case &quot;span&quot;:
+                    // same as final else, but short circuits lots of checks
+<span id="H2">                    tb.reconstructFormattingElements();</span>
+<span id="H2">                    tb.insertElementFor(startTag);</span>
+<span id="H2">                    break;</span>
+                case &quot;li&quot;:
+<span id="H2">                    tb.framesetOk(false);</span>
+<span id="H2">                    stack = tb.getStack();</span>
+<span id="H2">                    for (int i = stack.size() - 1; i &gt; 0; i--) {</span>
+<span id="H2">                        el = stack.get(i);</span>
+<span id="H2">                        if (el.normalName().equals(&quot;li&quot;)) {</span>
+<span id="H2">                            tb.processEndTag(&quot;li&quot;);</span>
+<span id="H2">                            break;</span>
+                        }
+<span id="H2">                        if (HtmlTreeBuilder.isSpecial(el) &amp;&amp; !inSorted(el.normalName(), Constants.InBodyStartLiBreakers))</span>
+<span id="H2">                            break;</span>
+                    }
+<span id="H2">                    if (tb.inButtonScope(&quot;p&quot;)) {</span>
+                        tb.processEndTag(&quot;p&quot;);
+                    }
+<span id="H2">                    tb.insertElementFor(startTag);</span>
+<span id="H2">                    break;</span>
+                case &quot;html&quot;:
+<span id="H2">                    tb.error(this);</span>
+<span id="H2">                    if (tb.onStack(&quot;template&quot;)) return false; // ignore</span>
+                    // otherwise, merge attributes onto real html (if present)
+<span id="H2">                    stack = tb.getStack();</span>
+<span id="H2">                    if (stack.size() &gt; 0) {</span>
+<span id="H2">                        Element html = tb.getStack().get(0);</span>
+<span id="H2">                        if (startTag.hasAttributes()) {</span>
+<span id="H4">                            for (Attribute attribute : startTag.attributes) {</span>
+<span id="H4">                                if (!html.hasAttr(attribute.getKey()))</span>
+<span id="H4">                                    html.attributes().put(attribute);</span>
+<span id="H4">                            }</span>
+                        }
+<span id="H2">                    }</span>
+                    break;
+                case &quot;body&quot;:
+<span id="H2">                    tb.error(this);</span>
+<span id="H2">                    stack = tb.getStack();</span>
+<span id="H2">                    if (stack.size() == 1 || (stack.size() &gt; 2 &amp;&amp; !stack.get(1).normalName().equals(&quot;body&quot;)) || tb.onStack(&quot;template&quot;)) {</span>
+                        // only in fragment case
+<span id="H4">                        return false; // ignore</span>
+                    } else {
+<span id="H2">                        tb.framesetOk(false);</span>
+                        // will be on stack if this is a nested body. won&#x27;t be if closed (which is a variance from spec, which leaves it on)
+                        Element body;
+<span id="H2">                        if (startTag.hasAttributes() &amp;&amp; (body = tb.getFromStack(&quot;body&quot;)) != null) { // we only ever put one body on stack</span>
+<span id="H2">                            for (Attribute attribute : startTag.attributes) {</span>
+<span id="H2">                                if (!body.hasAttr(attribute.getKey()))</span>
+<span id="H2">                                    body.attributes().put(attribute);</span>
+<span id="H2">                            }</span>
+                        }
+                    }
+<span id="H2">                    break;</span>
+                case &quot;frameset&quot;:
+<span id="H2">                    tb.error(this);</span>
+<span id="H2">                    stack = tb.getStack();</span>
+<span id="H2">                    if (stack.size() == 1 || (stack.size() &gt; 2 &amp;&amp; !stack.get(1).normalName().equals(&quot;body&quot;))) {</span>
+                        // only in fragment case
+<span id="H2">                        return false; // ignore</span>
+                    } else if (!tb.framesetOk()) {
+                        return false; // ignore frameset
+                    } else {
+                        Element second = stack.get(1);
+                        if (second.parent() != null)
+                            second.remove();
+                        // pop up to html element
+                        while (stack.size() &gt; 1)
+                            stack.remove(stack.size() - 1);
+                        tb.insertElementFor(startTag);
+                        tb.transition(InFrameset);
+                    }
+                    break;
+                case &quot;form&quot;:
+<span id="H1">                    if (tb.getFormElement() != null &amp;&amp; !tb.onStack(&quot;template&quot;)) {</span>
+                        tb.error(this);
+                        return false;
+                    }
+<span id="H1">                    if (tb.inButtonScope(&quot;p&quot;)) {</span>
+                        tb.closeElement(&quot;p&quot;);
+                    }
+<span id="H1">                    tb.insertFormElement(startTag, true, true); // won&#x27;t associate to any template</span>
+<span id="H1">                    break;</span>
+                case &quot;plaintext&quot;:
+<span id="H2">                    if (tb.inButtonScope(&quot;p&quot;)) {</span>
+                        tb.processEndTag(&quot;p&quot;);
+                    }
+<span id="H2">                    tb.insertElementFor(startTag);</span>
+<span id="H2">                    tb.tokeniser.transition(TokeniserState.PLAINTEXT); // once in, never gets out</span>
+<span id="H2">                    break;</span>
+                case &quot;button&quot;:
+<span id="H2">                    if (tb.inButtonScope(&quot;button&quot;)) {</span>
+                        // close and reprocess
+                        tb.error(this);
+                        tb.processEndTag(&quot;button&quot;);
+                        tb.process(startTag);
+                    } else {
+<span id="H2">                        tb.reconstructFormattingElements();</span>
+<span id="H2">                        tb.insertElementFor(startTag);</span>
+<span id="H2">                        tb.framesetOk(false);</span>
+                    }
+<span id="H2">                    break;</span>
+                case &quot;nobr&quot;:
+                    tb.reconstructFormattingElements();
+                    if (tb.inScope(&quot;nobr&quot;)) {
+                        tb.error(this);
+                        tb.processEndTag(&quot;nobr&quot;);
+                        tb.reconstructFormattingElements();
+                    }
+                    el = tb.insertElementFor(startTag);
+                    tb.pushActiveFormattingElements(el);
+                    break;
+                case &quot;table&quot;:
+<span id="H2">                    if (tb.getDocument().quirksMode() != Document.QuirksMode.quirks &amp;&amp; tb.inButtonScope(&quot;p&quot;)) {</span>
+                        tb.processEndTag(&quot;p&quot;);
+                    }
+<span id="H2">                    tb.insertElementFor(startTag);</span>
+<span id="H2">                    tb.framesetOk(false);</span>
+<span id="H2">                    tb.transition(InTable);</span>
+<span id="H2">                    break;</span>
+                case &quot;input&quot;:
+<span id="H2">                    tb.reconstructFormattingElements();</span>
+<span id="H2">                    el = tb.insertEmptyElementFor(startTag);</span>
+<span id="H2">                    if (!el.attr(&quot;type&quot;).equalsIgnoreCase(&quot;hidden&quot;))</span>
+<span id="H2">                        tb.framesetOk(false);</span>
+                    break;
+                case &quot;hr&quot;:
+<span id="H2">                    if (tb.inButtonScope(&quot;p&quot;)) {</span>
+                        tb.processEndTag(&quot;p&quot;);
+                    }
+<span id="H2">                    tb.insertEmptyElementFor(startTag);</span>
+<span id="H2">                    tb.framesetOk(false);</span>
+<span id="H2">                    break;</span>
+                case &quot;image&quot;:
+<span id="H1">                    if (tb.getFromStack(&quot;svg&quot;) == null)</span>
+<span id="H1">                        return tb.process(startTag.name(&quot;img&quot;)); // change &lt;image&gt; to &lt;img&gt;, unless in svg</span>
+                    else
+                        tb.insertElementFor(startTag);
+                    break;
+                case &quot;isindex&quot;:
+                    // how much do we care about the early 90s?
+<span id="H2">                    tb.error(this);</span>
+<span id="H2">                    if (tb.getFormElement() != null)</span>
+                        return false;
+
+<span id="H2">                    tb.processStartTag(&quot;form&quot;);</span>
+<span id="H2">                    if (startTag.hasAttribute(&quot;action&quot;)) {</span>
+<span id="H2">                        Element form = tb.getFormElement();</span>
+<span id="H2">                        if (form != null &amp;&amp; startTag.hasAttribute(&quot;action&quot;)) {</span>
+<span id="H2">                            String action = startTag.attributes.get(&quot;action&quot;);</span>
+<span id="H2">                            form.attributes().put(&quot;action&quot;, action); // always LC, so don&#x27;t need to scan up for ownerdoc</span>
+                        }
+                    }
+<span id="H2">                    tb.processStartTag(&quot;hr&quot;);</span>
+<span id="H2">                    tb.processStartTag(&quot;label&quot;);</span>
+                    // hope you like english.
+<span id="H2">                    String prompt = startTag.hasAttribute(&quot;prompt&quot;) ?</span>
+                        startTag.attributes.get(&quot;prompt&quot;) :
+<span id="H2">                        &quot;This is a searchable index. Enter search keywords: &quot;;</span>
+
+<span id="H2">                    tb.process(new Token.Character().data(prompt));</span>
+
+                    // input
+<span id="H2">                    Attributes inputAttribs = new Attributes();</span>
+<span id="H2">                    if (startTag.hasAttributes()) {</span>
+<span id="H2">                        for (Attribute attr : startTag.attributes) {</span>
+<span id="H2">                            if (!inSorted(attr.getKey(), Constants.InBodyStartInputAttribs))</span>
+                                inputAttribs.put(attr);
+<span id="H2">                        }</span>
+                    }
+<span id="H2">                    inputAttribs.put(&quot;name&quot;, &quot;isindex&quot;);</span>
+<span id="H2">                    tb.processStartTag(&quot;input&quot;, inputAttribs);</span>
+<span id="H2">                    tb.processEndTag(&quot;label&quot;);</span>
+<span id="H2">                    tb.processStartTag(&quot;hr&quot;);</span>
+<span id="H2">                    tb.processEndTag(&quot;form&quot;);</span>
+<span id="H2">                    break;</span>
+                case &quot;textarea&quot;:
+<span id="H1">                    tb.insertElementFor(startTag);</span>
+<span id="H1">                    if (!startTag.isSelfClosing()) {</span>
+<span id="H1">                        tb.tokeniser.transition(TokeniserState.Rcdata);</span>
+<span id="H1">                        tb.markInsertionMode();</span>
+<span id="H1">                        tb.framesetOk(false);</span>
+<span id="H1">                        tb.transition(Text);</span>
+                    }
+                    break;
+                case &quot;xmp&quot;:
+                    if (tb.inButtonScope(&quot;p&quot;)) {
+                        tb.processEndTag(&quot;p&quot;);
+                    }
+                    tb.reconstructFormattingElements();
+                    tb.framesetOk(false);
+                    handleRawtext(startTag, tb);
+                    break;
+                case &quot;iframe&quot;:
+<span id="H2">                    tb.framesetOk(false);</span>
+<span id="H2">                    handleRawtext(startTag, tb);</span>
+<span id="H2">                    break;</span>
+                case &quot;noembed&quot;:
+                    // also handle noscript if script enabled
+                    handleRawtext(startTag, tb);
+                    break;
+                case &quot;select&quot;:
+<span id="H1">                    tb.reconstructFormattingElements();</span>
+<span id="H1">                    tb.insertElementFor(startTag);</span>
+<span id="H1">                    tb.framesetOk(false);</span>
+<span id="H1">                    if (startTag.selfClosing) break; // don&#x27;t change states if not added to the stack</span>
+
+<span id="H1">                    HtmlTreeBuilderState state = tb.state();</span>
+<span id="H1">                    if (state.equals(InTable) || state.equals(InCaption) || state.equals(InTableBody) || state.equals(InRow) || state.equals(InCell))</span>
+                        tb.transition(InSelectInTable);
+                    else
+<span id="H1">                        tb.transition(InSelect);</span>
+<span id="H1">                    break;</span>
+                case &quot;math&quot;:
+<span id="H2">                    tb.reconstructFormattingElements();</span>
+<span id="H2">                    tb.insertForeignElementFor(startTag, Parser.NamespaceMathml);</span>
+<span id="H2">                    break;</span>
+                case &quot;svg&quot;:
+<span id="H1">                    tb.reconstructFormattingElements();</span>
+<span id="H1">                    tb.insertForeignElementFor(startTag, Parser.NamespaceSvg);</span>
+<span id="H1">                    break;</span>
+                // static final String[] Headings = new String[]{&quot;h1&quot;, &quot;h2&quot;, &quot;h3&quot;, &quot;h4&quot;, &quot;h5&quot;, &quot;h6&quot;};
+                case &quot;h1&quot;:
+                case &quot;h2&quot;:
+                case &quot;h3&quot;:
+                case &quot;h4&quot;:
+                case &quot;h5&quot;:
+                case &quot;h6&quot;:
+<span id="H2">                    if (tb.inButtonScope(&quot;p&quot;)) {</span>
+<span id="H2">                        tb.processEndTag(&quot;p&quot;);</span>
+                    }
+<span id="H2">                    if (inSorted(tb.currentElement().normalName(), Constants.Headings)) {</span>
+<span id="H2">                        tb.error(this);</span>
+<span id="H2">                        tb.pop();</span>
+                    }
+<span id="H2">                    tb.insertElementFor(startTag);</span>
+<span id="H2">                    break;</span>
+                // static final String[] InBodyStartPreListing = new String[]{&quot;listing&quot;, &quot;pre&quot;};
+                case &quot;pre&quot;:
+                case &quot;listing&quot;:
+<span id="H1">                    if (tb.inButtonScope(&quot;p&quot;)) {</span>
+<span id="H2">                        tb.processEndTag(&quot;p&quot;);</span>
+                    }
+<span id="H1">                    tb.insertElementFor(startTag);</span>
+<span id="H1">                    tb.reader.matchConsume(&quot;\n&quot;); // ignore LF if next token</span>
+<span id="H1">                    tb.framesetOk(false);</span>
+<span id="H1">                    break;</span>
+                // static final String[] DdDt = new String[]{&quot;dd&quot;, &quot;dt&quot;};
+                case &quot;dd&quot;:
+                case &quot;dt&quot;:
+<span id="H2">                    tb.framesetOk(false);</span>
+<span id="H2">                    stack = tb.getStack();</span>
+<span id="H2">                    final int bottom = stack.size() - 1;</span>
+<span id="H2">                    final int upper = bottom &gt;= MaxStackScan ? bottom - MaxStackScan : 0;</span>
+<span id="H2">                    for (int i = bottom; i &gt;= upper; i--) {</span>
+<span id="H2">                        el = stack.get(i);</span>
+<span id="H2">                        if (inSorted(el.normalName(), Constants.DdDt)) {</span>
+<span id="H2">                            tb.processEndTag(el.normalName());</span>
+<span id="H2">                            break;</span>
+                        }
+<span id="H2">                        if (HtmlTreeBuilder.isSpecial(el) &amp;&amp; !inSorted(el.normalName(), Constants.InBodyStartLiBreakers))</span>
+<span id="H2">                            break;</span>
+                    }
+<span id="H2">                    if (tb.inButtonScope(&quot;p&quot;)) {</span>
+                        tb.processEndTag(&quot;p&quot;);
+                    }
+<span id="H2">                    tb.insertElementFor(startTag);</span>
+<span id="H2">                    break;</span>
+
+                case &quot;optgroup&quot;:
+                case &quot;option&quot;:
+                    if (tb.currentElementIs(&quot;option&quot;))
+                        tb.processEndTag(&quot;option&quot;);
+                    tb.reconstructFormattingElements();
+                    tb.insertElementFor(startTag);
+                    break;
+
+                case &quot;rb&quot;:
+                case &quot;rtc&quot;:
+<span id="H2">                    if (tb.inScope(&quot;ruby&quot;)) {</span>
+<span id="H2">                        tb.generateImpliedEndTags();</span>
+<span id="H2">                        if (!tb.currentElementIs(&quot;ruby&quot;))</span>
+<span id="H2">                            tb.error(this);</span>
+                    }
+<span id="H2">                    tb.insertElementFor(startTag);</span>
+<span id="H2">                    break;</span>
+
+                case &quot;rp&quot;:
+                case &quot;rt&quot;:
+<span id="H2">                    if (tb.inScope(&quot;ruby&quot;)) {</span>
+<span id="H2">                        tb.generateImpliedEndTags(&quot;rtc&quot;);</span>
+<span id="H2">                        if (!tb.currentElementIs(&quot;rtc&quot;) &amp;&amp; !tb.currentElementIs(&quot;ruby&quot;))</span>
+<span id="H2">                            tb.error(this);</span>
+                    }
+<span id="H2">                    tb.insertElementFor(startTag);</span>
+<span id="H2">                    break;</span>
+
+                // InBodyStartEmptyFormatters:
+                case &quot;area&quot;:
+                case &quot;br&quot;:
+                case &quot;embed&quot;:
+                case &quot;img&quot;:
+                case &quot;keygen&quot;:
+                case &quot;wbr&quot;:
+<span id="H1">                    tb.reconstructFormattingElements();</span>
+<span id="H1">                    tb.insertEmptyElementFor(startTag);</span>
+<span id="H1">                    tb.framesetOk(false);</span>
+<span id="H1">                    break;</span>
+                // Formatters:
+                case &quot;b&quot;:
+                case &quot;big&quot;:
+                case &quot;code&quot;:
+                case &quot;em&quot;:
+                case &quot;font&quot;:
+                case &quot;i&quot;:
+                case &quot;s&quot;:
+                case &quot;small&quot;:
+                case &quot;strike&quot;:
+                case &quot;strong&quot;:
+                case &quot;tt&quot;:
+                case &quot;u&quot;:
+<span id="H1">                    tb.reconstructFormattingElements();</span>
+<span id="H1">                    el = tb.insertElementFor(startTag);</span>
+<span id="H1">                    tb.pushActiveFormattingElements(el);</span>
+<span id="H1">                    break;</span>
+                default:
+                    // todo - bring scan groups in if desired
+<span id="H2">                    if (!Tag.isKnownTag(name)) { // no special rules for custom tags</span>
+<span id="H2">                        tb.insertElementFor(startTag);</span>
+<span id="H2">                    } else if (inSorted(name, Constants.InBodyStartPClosers)) {</span>
+<span id="H2">                        if (tb.inButtonScope(&quot;p&quot;)) {</span>
+<span id="H2">                            tb.processEndTag(&quot;p&quot;);</span>
+                        }
+<span id="H2">                        tb.insertElementFor(startTag);</span>
+<span id="H2">                    } else if (inSorted(name, Constants.InBodyStartToHead)) {</span>
+<span id="H2">                        return tb.process(t, InHead);</span>
+<span id="H2">                    } else if (inSorted(name, Constants.InBodyStartApplets)) {</span>
+<span id="H2">                        tb.reconstructFormattingElements();</span>
+<span id="H2">                        tb.insertElementFor(startTag);</span>
+<span id="H2">                        tb.insertMarkerToFormattingElements();</span>
+<span id="H2">                        tb.framesetOk(false);</span>
+<span id="H2">                    } else if (inSorted(name, Constants.InBodyStartMedia)) {</span>
+                        tb.insertEmptyElementFor(startTag);
+<span id="H2">                    } else if (inSorted(name, Constants.InBodyStartDrop)) {</span>
+<span id="H2">                        tb.error(this);</span>
+<span id="H2">                        return false;</span>
+                    } else {
+<span id="H2">                        tb.reconstructFormattingElements();</span>
+<span id="H2">                        tb.insertElementFor(startTag);</span>
+                    }
+            }
+<span id="H1">            return true;</span>
+        }
+        private static final int MaxStackScan = 24; // used for DD / DT scan, prevents runaway
+
+        private boolean inBodyEndTag(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            final Token.EndTag endTag = t.asEndTag();</span>
+<span id="H1">            final String name = endTag.normalName();</span>
+
+<span id="H1">            switch (name) {</span>
+                case &quot;template&quot;:
+<span id="H2">                    tb.process(t, InHead);</span>
+<span id="H2">                    break;</span>
+                case &quot;sarcasm&quot;: // *sigh*
+                case &quot;span&quot;:
+                    // same as final fall through, but saves short circuit
+<span id="H2">                    return anyOtherEndTag(t, tb);</span>
+                case &quot;li&quot;:
+<span id="H2">                    if (!tb.inListItemScope(name)) {</span>
+                        tb.error(this);
+                        return false;
+                    } else {
+<span id="H2">                        tb.generateImpliedEndTags(name);</span>
+<span id="H2">                        if (!tb.currentElementIs(name))</span>
+<span id="H2">                            tb.error(this);</span>
+<span id="H2">                        tb.popStackToClose(name);</span>
+                    }
+<span id="H2">                    break;</span>
+                case &quot;body&quot;:
+<span id="H1">                    if (!tb.inScope(&quot;body&quot;)) {</span>
+                        tb.error(this);
+                        return false;
+                    } else {
+<span id="H1">                        if (tb.onStackNot(InBodyEndOtherErrors))</span>
+<span id="H2">                            tb.error(this);</span>
+<span id="H1">                        tb.onNodeClosed(tb.getFromStack(&quot;body&quot;)); // track source position of close; everything is still on stack in case of trailers</span>
+<span id="H1">                        tb.transition(AfterBody);</span>
+                    }
+<span id="H1">                    break;</span>
+                case &quot;html&quot;:
+<span id="H2">                    if (!tb.onStack(&quot;body&quot;)) {</span>
+                        tb.error(this);
+                        return false; // ignore
+                    } else {
+<span id="H2">                        if (tb.onStackNot(InBodyEndOtherErrors))</span>
+<span id="H2">                            tb.error(this);</span>
+<span id="H2">                        tb.transition(AfterBody);</span>
+<span id="H2">                        return tb.process(t); // re-process</span>
+                    }
+
+                case &quot;form&quot;:
+<span id="H2">                    if (!tb.onStack(&quot;template&quot;)) {</span>
+<span id="H2">                        Element currentForm = tb.getFormElement();</span>
+<span id="H2">                        tb.setFormElement(null);</span>
+<span id="H2">                        if (currentForm == null || !tb.inScope(name)) {</span>
+<span id="H2">                            tb.error(this);</span>
+<span id="H2">                            return false;</span>
+                        }
+<span id="H2">                        tb.generateImpliedEndTags();</span>
+<span id="H2">                        if (!tb.currentElementIs(name))</span>
+                            tb.error(this);
+                        // remove currentForm from stack. will shift anything under up.
+<span id="H2">                        tb.removeFromStack(currentForm);</span>
+<span id="H2">                    } else { // template on stack</span>
+<span id="H2">                        if (!tb.inScope(name)) {</span>
+                            tb.error(this);
+                            return false;
+                        }
+<span id="H2">                        tb.generateImpliedEndTags();</span>
+<span id="H2">                        if (!tb.currentElementIs(name)) tb.error(this);</span>
+<span id="H2">                        tb.popStackToClose(name);</span>
+                    }
+<span id="H2">                    break;</span>
+                case &quot;p&quot;:
+<span id="H2">                    if (!tb.inButtonScope(name)) {</span>
+<span id="H2">                        tb.error(this);</span>
+<span id="H2">                        tb.processStartTag(name); // if no p to close, creates an empty &lt;p&gt;&lt;/p&gt;</span>
+<span id="H2">                        return tb.process(endTag);</span>
+                    } else {
+<span id="H2">                        tb.generateImpliedEndTags(name);</span>
+<span id="H2">                        if (!tb.currentElementIs(name))</span>
+<span id="H2">                            tb.error(this);</span>
+<span id="H2">                        tb.popStackToClose(name);</span>
+                    }
+<span id="H2">                    break;</span>
+                case &quot;dd&quot;:
+                case &quot;dt&quot;:
+<span id="H2">                    if (!tb.inScope(name)) {</span>
+                        tb.error(this);
+                        return false;
+                    } else {
+<span id="H2">                        tb.generateImpliedEndTags(name);</span>
+<span id="H2">                        if (!tb.currentElementIs(name))</span>
+                            tb.error(this);
+<span id="H2">                        tb.popStackToClose(name);</span>
+                    }
+<span id="H2">                    break;</span>
+                case &quot;h1&quot;:
+                case &quot;h2&quot;:
+                case &quot;h3&quot;:
+                case &quot;h4&quot;:
+                case &quot;h5&quot;:
+                case &quot;h6&quot;:
+<span id="H2">                    if (!tb.inScope(Constants.Headings)) {</span>
+<span id="H2">                        tb.error(this);</span>
+<span id="H2">                        return false;</span>
+                    } else {
+<span id="H2">                        tb.generateImpliedEndTags(name);</span>
+<span id="H2">                        if (!tb.currentElementIs(name))</span>
+                            tb.error(this);
+<span id="H2">                        tb.popStackToClose(Constants.Headings);</span>
+                    }
+<span id="H2">                    break;</span>
+                case &quot;br&quot;:
+<span id="H2">                    tb.error(this);</span>
+<span id="H2">                    tb.processStartTag(&quot;br&quot;);</span>
+<span id="H2">                    return false;</span>
+                default:
+                    // todo - move rest to switch if desired
+<span id="H1">                    if (inSorted(name, Constants.InBodyEndAdoptionFormatters)) {</span>
+<span id="H1">                        return inBodyEndTagAdoption(t, tb);</span>
+<span id="H1">                    } else if (inSorted(name, Constants.InBodyEndClosers)) {</span>
+<span id="H1">                        if (!tb.inScope(name)) {</span>
+                            // nothing to close
+<span id="H2">                            tb.error(this);</span>
+<span id="H2">                            return false;</span>
+                        } else {
+<span id="H1">                            tb.generateImpliedEndTags();</span>
+<span id="H1">                            if (!tb.currentElementIs(name))</span>
+<span id="H2">                                tb.error(this);</span>
+<span id="H1">                            tb.popStackToClose(name);</span>
+                        }
+<span id="H2">                    } else if (inSorted(name, Constants.InBodyStartApplets)) {</span>
+                        if (!tb.inScope(&quot;name&quot;)) {
+                            if (!tb.inScope(name)) {
+                                tb.error(this);
+                                return false;
+                            }
+                            tb.generateImpliedEndTags();
+                            if (!tb.currentElementIs(name))
+                                tb.error(this);
+                            tb.popStackToClose(name);
+                            tb.clearFormattingElementsToLastMarker();
+                        }
+                    } else {
+<span id="H2">                        return anyOtherEndTag(t, tb);</span>
+                    }
+            }
+<span id="H1">            return true;</span>
+        }
+
+        boolean anyOtherEndTag(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            final String name = t.asEndTag().normalName; // case insensitive search - goal is to preserve output case, not for the parse to be case sensitive</span>
+<span id="H2">            final ArrayList&lt;Element&gt; stack = tb.getStack();</span>
+
+            // deviate from spec slightly to speed when super deeply nested
+<span id="H2">            Element elFromStack = tb.getFromStack(name);</span>
+<span id="H2">            if (elFromStack == null) {</span>
+<span id="H2">                tb.error(this);</span>
+<span id="H2">                return false;</span>
+            }
+
+<span id="H2">            for (int pos = stack.size() - 1; pos &gt;= 0; pos--) {</span>
+<span id="H2">                Element node = stack.get(pos);</span>
+<span id="H2">                if (node.normalName().equals(name)) {</span>
+<span id="H2">                    tb.generateImpliedEndTags(name);</span>
+<span id="H2">                    if (!tb.currentElementIs(name))</span>
+                        tb.error(this);
+<span id="H2">                    tb.popStackToClose(name);</span>
+<span id="H2">                    break;</span>
+                } else {
+<span id="H2">                    if (HtmlTreeBuilder.isSpecial(node)) {</span>
+                        tb.error(this);
+                        return false;
+                    }
+                }
+            }
+<span id="H2">            return true;</span>
+        }
+
+        // Adoption Agency Algorithm.
+        private boolean inBodyEndTagAdoption(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            final Token.EndTag endTag = t.asEndTag();</span>
+<span id="H1">            final String name = endTag.normalName();</span>
+
+<span id="H1">            final ArrayList&lt;Element&gt; stack = tb.getStack();</span>
+            Element el;
+<span id="H1">            for (int i = 0; i &lt; 8; i++) {</span>
+<span id="H1">                Element formatEl = tb.getActiveFormattingElement(name);</span>
+<span id="H1">                if (formatEl == null)</span>
+<span id="H2">                    return anyOtherEndTag(t, tb);</span>
+<span id="H1">                else if (!tb.onStack(formatEl)) {</span>
+<span id="H4">                    tb.error(this);</span>
+<span id="H4">                    tb.removeFromActiveFormattingElements(formatEl);</span>
+<span id="H4">                    return true;</span>
+<span id="H1">                } else if (!tb.inScope(formatEl.normalName())) {</span>
+                    tb.error(this);
+                    return false;
+<span id="H1">                } else if (tb.currentElement() != formatEl)</span>
+<span id="H2">                    tb.error(this);</span>
+
+<span id="H1">                Element furthestBlock = null;</span>
+<span id="H1">                Element commonAncestor = null;</span>
+<span id="H1">                boolean seenFormattingElement = false;</span>
+                // the spec doesn&#x27;t limit to &lt; 64, but in degenerate cases (9000+ stack depth) this prevents run-aways
+<span id="H1">                final int stackSize = stack.size();</span>
+<span id="H1">                int bookmark = -1;</span>
+<span id="H1">                for (int si = 1; si &lt; stackSize &amp;&amp; si &lt; 64; si++) {</span>
+                    // TODO: this no longer matches the current spec at https://html.spec.whatwg.org/#adoption-agency-algorithm and should be updated
+<span id="H1">                    el = stack.get(si);</span>
+<span id="H1">                    if (el == formatEl) {</span>
+<span id="H1">                        commonAncestor = stack.get(si - 1);</span>
+<span id="H1">                        seenFormattingElement = true;</span>
+                        // Let a bookmark note the position of the formatting element in the list of active formatting elements relative to the elements on either side of it in the list.
+<span id="H1">                        bookmark = tb.positionOfElement(el);</span>
+<span id="H1">                    } else if (seenFormattingElement &amp;&amp; HtmlTreeBuilder.isSpecial(el)) {</span>
+<span id="H2">                        furthestBlock = el;</span>
+<span id="H2">                        break;</span>
+                    }
+                }
+<span id="H1">                if (furthestBlock == null) {</span>
+<span id="H1">                    tb.popStackToClose(formatEl.normalName());</span>
+<span id="H1">                    tb.removeFromActiveFormattingElements(formatEl);</span>
+<span id="H1">                    return true;</span>
+                }
+
+<span id="H2">                Element node = furthestBlock;</span>
+<span id="H2">                Element lastNode = furthestBlock;</span>
+<span id="H2">                for (int j = 0; j &lt; 3; j++) {</span>
+<span id="H2">                    if (tb.onStack(node))</span>
+<span id="H2">                        node = tb.aboveOnStack(node);</span>
+<span id="H2">                    if (!tb.isInActiveFormattingElements(node)) { // note no bookmark check</span>
+                        tb.removeFromStack(node);
+                        continue;
+<span id="H2">                    } else if (node == formatEl)</span>
+<span id="H2">                        break;</span>
+
+<span id="H2">                    Element replacement = new Element(tb.tagFor(node.nodeName(), ParseSettings.preserveCase), tb.getBaseUri());</span>
+                    // case will follow the original node (so honours ParseSettings)
+<span id="H2">                    tb.replaceActiveFormattingElement(node, replacement);</span>
+<span id="H2">                    tb.replaceOnStack(node, replacement);</span>
+<span id="H2">                    node = replacement;</span>
+
+<span id="H2">                    if (lastNode == furthestBlock) {</span>
+                        // move the aforementioned bookmark to be immediately after the new node in the list of active formatting elements.
+                        // not getting how this bookmark both straddles the element above, but is inbetween here...
+<span id="H2">                        bookmark = tb.positionOfElement(node) + 1;</span>
+                    }
+<span id="H2">                    if (lastNode.parent() != null)</span>
+<span id="H2">                        lastNode.remove();</span>
+<span id="H2">                    node.appendChild(lastNode);</span>
+
+<span id="H2">                    lastNode = node;</span>
+                }
+
+<span id="H2">                if (commonAncestor != null) { // safety check, but would be an error if null</span>
+<span id="H2">                    if (inSorted(commonAncestor.normalName(), Constants.InBodyEndTableFosters)) {</span>
+                        if (lastNode.parent() != null)
+                            lastNode.remove();
+                        tb.insertInFosterParent(lastNode);
+                    } else {
+<span id="H2">                        if (lastNode.parent() != null)</span>
+<span id="H2">                            lastNode.remove();</span>
+<span id="H2">                        commonAncestor.appendChild(lastNode);</span>
+                    }
+                }
+
+<span id="H2">                Element adopter = new Element(formatEl.tag(), tb.getBaseUri());</span>
+<span id="H2">                adopter.attributes().addAll(formatEl.attributes());</span>
+<span id="H2">                adopter.appendChildren(furthestBlock.childNodes());</span>
+<span id="H2">                furthestBlock.appendChild(adopter);</span>
+<span id="H2">                tb.removeFromActiveFormattingElements(formatEl);</span>
+                // insert the new element into the list of active formatting elements at the position of the aforementioned bookmark.
+<span id="H2">                tb.pushWithBookmark(adopter, bookmark);</span>
+<span id="H2">                tb.removeFromStack(formatEl);</span>
+<span id="H2">                tb.insertOnStackAfter(furthestBlock, adopter);</span>
+            }
+            return true;
+        }
+    },
+<span id="H1">    Text {</span>
+        // in script, style etc. normally treated as data tags
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            if (t.isCharacter()) {</span>
+<span id="H1">                tb.insertCharacterNode(t.asCharacter());</span>
+<span id="H1">            } else if (t.isEOF()) {</span>
+<span id="H1">                tb.error(this);</span>
+                // if current node is script: already started
+<span id="H1">                tb.pop();</span>
+<span id="H1">                tb.transition(tb.originalState());</span>
+<span id="H1">                return tb.process(t);</span>
+<span id="H1">            } else if (t.isEndTag()) {</span>
+                // if: An end tag whose tag name is &quot;script&quot; -- scripting nesting level, if evaluating scripts
+<span id="H1">                tb.pop();</span>
+<span id="H1">                tb.transition(tb.originalState());</span>
+            }
+<span id="H1">            return true;</span>
+        }
+    },
+<span id="H1">    InTable {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            if (t.isCharacter() &amp;&amp; inSorted(tb.currentElement().normalName(), InTableFoster)) {</span>
+<span id="H2">                tb.resetPendingTableCharacters();</span>
+<span id="H2">                tb.markInsertionMode();</span>
+<span id="H2">                tb.transition(InTableText);</span>
+<span id="H2">                return tb.process(t);</span>
+<span id="H2">            } else if (t.isComment()) {</span>
+<span id="H2">                tb.insertCommentNode(t.asComment());</span>
+<span id="H2">                return true;</span>
+<span id="H2">            } else if (t.isDoctype()) {</span>
+                tb.error(this);
+                return false;
+<span id="H2">            } else if (t.isStartTag()) {</span>
+<span id="H2">                Token.StartTag startTag = t.asStartTag();</span>
+<span id="H2">                String name = startTag.normalName();</span>
+<span id="H2">                if (name.equals(&quot;caption&quot;)) {</span>
+<span id="H2">                    tb.clearStackToTableContext();</span>
+<span id="H2">                    tb.insertMarkerToFormattingElements();</span>
+<span id="H2">                    tb.insertElementFor(startTag);</span>
+<span id="H2">                    tb.transition(InCaption);</span>
+<span id="H2">                } else if (name.equals(&quot;colgroup&quot;)) {</span>
+<span id="H2">                    tb.clearStackToTableContext();</span>
+<span id="H2">                    tb.insertElementFor(startTag);</span>
+<span id="H2">                    tb.transition(InColumnGroup);</span>
+<span id="H2">                } else if (name.equals(&quot;col&quot;)) {</span>
+                    tb.clearStackToTableContext();
+                    tb.processStartTag(&quot;colgroup&quot;);
+                    return tb.process(t);
+<span id="H2">                } else if (inSorted(name, InTableToBody)) {</span>
+<span id="H2">                    tb.clearStackToTableContext();</span>
+<span id="H2">                    tb.insertElementFor(startTag);</span>
+<span id="H2">                    tb.transition(InTableBody);</span>
+<span id="H2">                } else if (inSorted(name, InTableAddBody)) {</span>
+<span id="H2">                    tb.clearStackToTableContext();</span>
+<span id="H2">                    tb.processStartTag(&quot;tbody&quot;);</span>
+<span id="H2">                    return tb.process(t);</span>
+<span id="H2">                } else if (name.equals(&quot;table&quot;)) {</span>
+<span id="H2">                    tb.error(this);</span>
+<span id="H2">                    if (!tb.inTableScope(name)) { // ignore it</span>
+                        return false;
+                    } else {
+<span id="H2">                        tb.popStackToClose(name);</span>
+<span id="H2">                        if (!tb.resetInsertionMode()) {</span>
+                            // not per spec - but haven&#x27;t transitioned out of table. so try something else
+                            tb.insertElementFor(startTag);
+                            return true;
+                        }
+<span id="H2">                        return tb.process(t);</span>
+                    }
+<span id="H2">                } else if (inSorted(name, InTableToHead)) {</span>
+<span id="H2">                    return tb.process(t, InHead);</span>
+<span id="H2">                } else if (name.equals(&quot;input&quot;)) {</span>
+<span id="H2">                    if (!(startTag.hasAttributes() &amp;&amp; startTag.attributes.get(&quot;type&quot;).equalsIgnoreCase(&quot;hidden&quot;))) {</span>
+<span id="H2">                        return anythingElse(t, tb);</span>
+                    } else {
+<span id="H2">                        tb.insertEmptyElementFor(startTag);</span>
+                    }
+<span id="H2">                } else if (name.equals(&quot;form&quot;)) {</span>
+<span id="H2">                    tb.error(this);</span>
+<span id="H2">                    if (tb.getFormElement() != null || tb.onStack(&quot;template&quot;))</span>
+                        return false;
+                    else {
+<span id="H2">                        tb.insertFormElement(startTag, false, false); // not added to stack. can associate to template</span>
+                    }
+                } else {
+<span id="H2">                    return anythingElse(t, tb);</span>
+                }
+<span id="H2">                return true; // todo: check if should return processed http://www.whatwg.org/specs/web-apps/current-work/multipage/tree-construction.html#parsing-main-intable</span>
+<span id="H2">            } else if (t.isEndTag()) {</span>
+<span id="H2">                Token.EndTag endTag = t.asEndTag();</span>
+<span id="H2">                String name = endTag.normalName();</span>
+
+<span id="H2">                if (name.equals(&quot;table&quot;)) {</span>
+<span id="H2">                    if (!tb.inTableScope(name)) {</span>
+                        tb.error(this);
+                        return false;
+                    } else {
+<span id="H2">                        tb.popStackToClose(&quot;table&quot;);</span>
+<span id="H2">                        tb.resetInsertionMode();</span>
+                    }
+<span id="H2">                } else if (inSorted(name, InTableEndErr)) {</span>
+<span id="H2">                    tb.error(this);</span>
+<span id="H2">                    return false;</span>
+<span id="H2">                } else if (name.equals(&quot;template&quot;)) {</span>
+<span id="H2">                    tb.process(t, InHead);</span>
+                } else {
+<span id="H2">                    return anythingElse(t, tb);</span>
+                }
+<span id="H2">                return true; // todo: as above todo</span>
+<span id="H2">            } else if (t.isEOF()) {</span>
+<span id="H2">                if (tb.currentElementIs(&quot;html&quot;))</span>
+                    tb.error(this);
+<span id="H2">                return true; // stops parsing</span>
+            }
+<span id="H2">            return anythingElse(t, tb);</span>
+        }
+
+        boolean anythingElse(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            tb.error(this);</span>
+<span id="H2">            tb.setFosterInserts(true);</span>
+<span id="H2">            tb.process(t, InBody);</span>
+<span id="H2">            tb.setFosterInserts(false);</span>
+<span id="H2">            return true;</span>
+        }
+    },
+<span id="H1">    InTableText {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            if (t.type == Token.TokenType.Character) {</span>
+<span id="H2">                Token.Character c = t.asCharacter();</span>
+<span id="H2">                if (c.getData().equals(nullString)) {</span>
+                    tb.error(this);
+                    return false;
+                } else {
+<span id="H2">                    tb.addPendingTableCharacters(c);</span>
+                }
+<span id="H2">            } else {</span>
+                // insert gathered table text into the correct element:
+<span id="H2">                if (tb.getPendingTableCharacters().size() &gt; 0) {</span>
+<span id="H2">                    final Token og = tb.currentToken; // update current token, so we can track cursor pos correctly</span>
+<span id="H2">                    for (Token.Character c : tb.getPendingTableCharacters()) {</span>
+<span id="H2">                        tb.currentToken = c;</span>
+<span id="H2">                        if (!isWhitespace(c)) {</span>
+                            // InTable anything else section:
+<span id="H2">                            tb.error(this);</span>
+<span id="H2">                            if (inSorted(tb.currentElement().normalName(), InTableFoster)) {</span>
+<span id="H2">                                tb.setFosterInserts(true);</span>
+<span id="H2">                                tb.process(c, InBody);</span>
+<span id="H2">                                tb.setFosterInserts(false);</span>
+                            } else {
+                                tb.process(c, InBody);
+                            }
+                        } else
+<span id="H2">                            tb.insertCharacterNode(c);</span>
+<span id="H2">                    }</span>
+<span id="H2">                    tb.currentToken = og;</span>
+<span id="H2">                    tb.resetPendingTableCharacters();</span>
+                }
+<span id="H2">                tb.transition(tb.originalState());</span>
+<span id="H2">                return tb.process(t);</span>
+            }
+<span id="H2">            return true;</span>
+        }
+    },
+<span id="H1">    InCaption {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            if (t.isEndTag() &amp;&amp; t.asEndTag().normalName().equals(&quot;caption&quot;)) {</span>
+<span id="H2">                Token.EndTag endTag = t.asEndTag();</span>
+<span id="H2">                String name = endTag.normalName();</span>
+<span id="H2">                if (!tb.inTableScope(name)) {</span>
+                    tb.error(this);
+                    return false;
+                } else {
+<span id="H2">                    tb.generateImpliedEndTags();</span>
+<span id="H2">                    if (!tb.currentElementIs(&quot;caption&quot;))</span>
+                        tb.error(this);
+<span id="H2">                    tb.popStackToClose(&quot;caption&quot;);</span>
+<span id="H2">                    tb.clearFormattingElementsToLastMarker();</span>
+<span id="H2">                    tb.transition(InTable);</span>
+                }
+<span id="H2">            } else if ((</span>
+<span id="H2">                    t.isStartTag() &amp;&amp; inSorted(t.asStartTag().normalName(), InCellCol) ||</span>
+<span id="H2">                            t.isEndTag() &amp;&amp; t.asEndTag().normalName().equals(&quot;table&quot;))</span>
+                    ) {
+<span id="H2">                tb.error(this);</span>
+<span id="H2">                boolean processed = tb.processEndTag(&quot;caption&quot;);</span>
+<span id="H2">                if (processed)</span>
+<span id="H2">                    return tb.process(t);</span>
+<span id="H2">            } else if (t.isEndTag() &amp;&amp; inSorted(t.asEndTag().normalName(), InCaptionIgnore)) {</span>
+                tb.error(this);
+                return false;
+            } else {
+<span id="H2">                return tb.process(t, InBody);</span>
+            }
+<span id="H2">            return true;</span>
+        }
+    },
+<span id="H1">    InColumnGroup {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            if (isWhitespace(t)) {</span>
+<span id="H2">                tb.insertCharacterNode(t.asCharacter());</span>
+<span id="H2">                return true;</span>
+            }
+<span id="H2">            switch (t.type) {</span>
+                case Comment:
+                    tb.insertCommentNode(t.asComment());
+                    break;
+                case Doctype:
+                    tb.error(this);
+                    break;
+                case StartTag:
+<span id="H2">                    Token.StartTag startTag = t.asStartTag();</span>
+<span id="H2">                    switch (startTag.normalName()) {</span>
+                        case &quot;html&quot;:
+                            return tb.process(t, InBody);
+                        case &quot;col&quot;:
+<span id="H2">                            tb.insertEmptyElementFor(startTag);</span>
+<span id="H2">                            break;</span>
+                        case &quot;template&quot;:
+                            tb.process(t, InHead);
+                            break;
+                        default:
+<span id="H2">                            return anythingElse(t, tb);</span>
+                    }
+<span id="H2">                    break;</span>
+                case EndTag:
+                    Token.EndTag endTag = t.asEndTag();
+                    String name = endTag.normalName();
+                    switch (name) {
+                        case &quot;colgroup&quot;:
+                            if (!tb.currentElementIs(name)) {
+                                tb.error(this);
+                                return false;
+                            } else {
+                                tb.pop();
+                                tb.transition(InTable);
+                            }
+                            break;
+                        case &quot;template&quot;:
+                            tb.process(t, InHead);
+                            break;
+                        default:
+                            return anythingElse(t, tb);
+                    }
+                    break;
+                case EOF:
+                    if (tb.currentElementIs(&quot;html&quot;))
+                        return true; // stop parsing; frag case
+                    else
+                        return anythingElse(t, tb);
+                default:
+                    return anythingElse(t, tb);
+            }
+<span id="H2">            return true;</span>
+        }
+
+        private boolean anythingElse(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            if (!tb.currentElementIs(&quot;colgroup&quot;)) {</span>
+                tb.error(this);
+                return false;
+            }
+<span id="H2">            tb.pop();</span>
+<span id="H2">            tb.transition(InTable);</span>
+<span id="H2">            tb.process(t);</span>
+<span id="H2">            return true;</span>
+        }
+    },
+<span id="H1">    InTableBody {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            switch (t.type) {</span>
+                case StartTag:
+<span id="H2">                    Token.StartTag startTag = t.asStartTag();</span>
+<span id="H2">                    String name = startTag.normalName();</span>
+<span id="H2">                    if (name.equals(&quot;tr&quot;)) {</span>
+<span id="H2">                        tb.clearStackToTableBodyContext();</span>
+<span id="H2">                        tb.insertElementFor(startTag);</span>
+<span id="H2">                        tb.transition(InRow);</span>
+<span id="H2">                    } else if (inSorted(name, InCellNames)) {</span>
+<span id="H2">                        tb.error(this);</span>
+<span id="H2">                        tb.processStartTag(&quot;tr&quot;);</span>
+<span id="H2">                        return tb.process(startTag);</span>
+<span id="H2">                    } else if (inSorted(name, InTableBodyExit)) {</span>
+<span id="H2">                        return exitTableBody(t, tb);</span>
+                    } else
+<span id="H2">                        return anythingElse(t, tb);</span>
+                    break;
+                case EndTag:
+<span id="H2">                    Token.EndTag endTag = t.asEndTag();</span>
+<span id="H2">                    name = endTag.normalName();</span>
+<span id="H2">                    if (inSorted(name, InTableEndIgnore)) {</span>
+<span id="H2">                        if (!tb.inTableScope(name)) {</span>
+                            tb.error(this);
+                            return false;
+                        } else {
+<span id="H2">                            tb.clearStackToTableBodyContext();</span>
+<span id="H2">                            tb.pop();</span>
+<span id="H2">                            tb.transition(InTable);</span>
+                        }
+<span id="H2">                    } else if (name.equals(&quot;table&quot;)) {</span>
+<span id="H2">                        return exitTableBody(t, tb);</span>
+<span id="H2">                    } else if (inSorted(name, InTableBodyEndIgnore)) {</span>
+<span id="H2">                        tb.error(this);</span>
+<span id="H2">                        return false;</span>
+                    } else
+<span id="H2">                        return anythingElse(t, tb);</span>
+                    break;
+                default:
+<span id="H2">                    return anythingElse(t, tb);</span>
+            }
+<span id="H2">            return true;</span>
+        }
+
+        private boolean exitTableBody(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            if (!(tb.inTableScope(&quot;tbody&quot;) || tb.inTableScope(&quot;thead&quot;) || tb.inScope(&quot;tfoot&quot;))) {</span>
+                // frag case
+                tb.error(this);
+                return false;
+            }
+<span id="H2">            tb.clearStackToTableBodyContext();</span>
+<span id="H2">            tb.processEndTag(tb.currentElement().normalName()); // tbody, tfoot, thead</span>
+<span id="H2">            return tb.process(t);</span>
+        }
+
+        private boolean anythingElse(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            return tb.process(t, InTable);</span>
+        }
+    },
+<span id="H1">    InRow {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            if (t.isStartTag()) {</span>
+<span id="H2">                Token.StartTag startTag = t.asStartTag();</span>
+<span id="H2">                String name = startTag.normalName();</span>
+
+<span id="H2">                if (inSorted(name, InCellNames)) { // th, th</span>
+<span id="H2">                    tb.clearStackToTableRowContext();</span>
+<span id="H2">                    tb.insertElementFor(startTag);</span>
+<span id="H2">                    tb.transition(InCell);</span>
+<span id="H2">                    tb.insertMarkerToFormattingElements();</span>
+<span id="H2">                } else if (inSorted(name, InRowMissing)) { // &quot;caption&quot;, &quot;col&quot;, &quot;colgroup&quot;, &quot;tbody&quot;, &quot;tfoot&quot;, &quot;thead&quot;, &quot;tr&quot;</span>
+<span id="H2">                    if (!tb.inTableScope(&quot;tr&quot;)) {</span>
+                        tb.error(this);
+                        return false;
+                    }
+<span id="H2">                    tb.clearStackToTableRowContext();</span>
+<span id="H2">                    tb.pop(); // tr</span>
+<span id="H2">                    tb.transition(InTableBody);</span>
+<span id="H2">                    return tb.process(t);</span>
+                } else {
+<span id="H2">                    return anythingElse(t, tb);</span>
+                }
+<span id="H2">            } else if (t.isEndTag()) {</span>
+<span id="H2">                Token.EndTag endTag = t.asEndTag();</span>
+<span id="H2">                String name = endTag.normalName();</span>
+
+<span id="H2">                if (name.equals(&quot;tr&quot;)) {</span>
+<span id="H2">                    if (!tb.inTableScope(name)) {</span>
+                        tb.error(this); // frag
+                        return false;
+                    }
+<span id="H2">                    tb.clearStackToTableRowContext();</span>
+<span id="H2">                    tb.pop(); // tr</span>
+<span id="H2">                    tb.transition(InTableBody);</span>
+<span id="H2">                } else if (name.equals(&quot;table&quot;)) {</span>
+<span id="H2">                    if (!tb.inTableScope(&quot;tr&quot;)) {</span>
+                        tb.error(this);
+                        return false;
+                    }
+<span id="H2">                    tb.clearStackToTableRowContext();</span>
+<span id="H2">                    tb.pop(); // tr</span>
+<span id="H2">                    tb.transition(InTableBody);</span>
+<span id="H2">                    return tb.process(t);</span>
+<span id="H2">                } else if (inSorted(name, InTableToBody)) { // &quot;tbody&quot;, &quot;tfoot&quot;, &quot;thead&quot;</span>
+<span id="H2">                    if (!tb.inTableScope(name)) {</span>
+                        tb.error(this);
+                        return false;
+                    }
+<span id="H2">                    if (!tb.inTableScope(&quot;tr&quot;)) {</span>
+                        // not an error per spec?
+                        return false;
+                    }
+<span id="H2">                    tb.clearStackToTableRowContext();</span>
+<span id="H2">                    tb.pop(); // tr</span>
+<span id="H2">                    tb.transition(InTableBody);</span>
+<span id="H2">                    return tb.process(t);</span>
+<span id="H2">                } else if (inSorted(name, InRowIgnore)) {</span>
+                    tb.error(this);
+                    return false;
+                } else {
+<span id="H2">                    return anythingElse(t, tb);</span>
+                }
+<span id="H2">            } else {</span>
+<span id="H2">                return anythingElse(t, tb);</span>
+            }
+<span id="H2">            return true;</span>
+        }
+
+        private boolean anythingElse(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            return tb.process(t, InTable);</span>
+        }
+    },
+<span id="H1">    InCell {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            if (t.isEndTag()) {</span>
+<span id="H2">                Token.EndTag endTag = t.asEndTag();</span>
+<span id="H2">                String name = endTag.normalName();</span>
+
+<span id="H2">                if (inSorted(name, Constants.InCellNames)) {</span>
+<span id="H2">                    if (!tb.inTableScope(name)) {</span>
+                        tb.error(this);
+                        tb.transition(InRow); // might not be in scope if empty: &lt;td /&gt; and processing fake end tag
+                        return false;
+                    }
+<span id="H2">                    tb.generateImpliedEndTags();</span>
+<span id="H2">                    if (!tb.currentElementIs(name))</span>
+                        tb.error(this);
+<span id="H2">                    tb.popStackToClose(name);</span>
+<span id="H2">                    tb.clearFormattingElementsToLastMarker();</span>
+<span id="H2">                    tb.transition(InRow);</span>
+<span id="H2">                } else if (inSorted(name, Constants.InCellBody)) {</span>
+                    tb.error(this);
+                    return false;
+<span id="H2">                } else if (inSorted(name, Constants.InCellTable)) {</span>
+<span id="H2">                    if (!tb.inTableScope(name)) {</span>
+                        tb.error(this);
+                        return false;
+                    }
+<span id="H2">                    closeCell(tb);</span>
+<span id="H2">                    return tb.process(t);</span>
+                } else {
+<span id="H2">                    return anythingElse(t, tb);</span>
+                }
+<span id="H2">            } else if (t.isStartTag() &amp;&amp;</span>
+<span id="H2">                    inSorted(t.asStartTag().normalName(), Constants.InCellCol)) {</span>
+<span id="H2">                if (!(tb.inTableScope(&quot;td&quot;) || tb.inTableScope(&quot;th&quot;))) {</span>
+                    tb.error(this);
+                    return false;
+                }
+<span id="H2">                closeCell(tb);</span>
+<span id="H2">                return tb.process(t);</span>
+            } else {
+<span id="H2">                return anythingElse(t, tb);</span>
+            }
+<span id="H2">            return true;</span>
+        }
+
+        private boolean anythingElse(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            return tb.process(t, InBody);</span>
+        }
+
+        private void closeCell(HtmlTreeBuilder tb) {
+<span id="H2">            if (tb.inTableScope(&quot;td&quot;))</span>
+<span id="H2">                tb.processEndTag(&quot;td&quot;);</span>
+            else
+<span id="H2">                tb.processEndTag(&quot;th&quot;); // only here if th or td in scope</span>
+<span id="H2">        }</span>
+    },
+<span id="H1">    InSelect {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            switch (t.type) {</span>
+                case Character:
+<span id="H1">                    Token.Character c = t.asCharacter();</span>
+<span id="H1">                    if (c.getData().equals(nullString)) {</span>
+                        tb.error(this);
+                        return false;
+                    } else {
+<span id="H1">                        tb.insertCharacterNode(c);</span>
+                    }
+<span id="H1">                    break;</span>
+                case Comment:
+                    tb.insertCommentNode(t.asComment());
+                    break;
+                case Doctype:
+                    tb.error(this);
+                    return false;
+                case StartTag:
+<span id="H1">                    Token.StartTag start = t.asStartTag();</span>
+<span id="H1">                    String name = start.normalName();</span>
+<span id="H1">                    if (name.equals(&quot;html&quot;))</span>
+                        return tb.process(start, InBody);
+<span id="H1">                    else if (name.equals(&quot;option&quot;)) {</span>
+<span id="H1">                        if (tb.currentElementIs(&quot;option&quot;))</span>
+<span id="H2">                            tb.processEndTag(&quot;option&quot;);</span>
+<span id="H1">                        tb.insertElementFor(start);</span>
+<span id="H2">                    } else if (name.equals(&quot;optgroup&quot;)) {</span>
+<span id="H2">                        if (tb.currentElementIs(&quot;option&quot;))</span>
+<span id="H2">                            tb.processEndTag(&quot;option&quot;); // pop option and flow to pop optgroup</span>
+<span id="H2">                        if (tb.currentElementIs(&quot;optgroup&quot;))</span>
+<span id="H2">                            tb.processEndTag(&quot;optgroup&quot;);</span>
+<span id="H2">                        tb.insertElementFor(start);</span>
+<span id="H2">                    } else if (name.equals(&quot;select&quot;)) {</span>
+                        tb.error(this);
+                        return tb.processEndTag(&quot;select&quot;);
+<span id="H2">                    } else if (inSorted(name, InSelectEnd)) {</span>
+<span id="H2">                        tb.error(this);</span>
+<span id="H2">                        if (!tb.inSelectScope(&quot;select&quot;))</span>
+                            return false; // frag
+<span id="H2">                        tb.processEndTag(&quot;select&quot;);</span>
+<span id="H2">                        return tb.process(start);</span>
+<span id="H2">                    } else if (name.equals(&quot;script&quot;) || name.equals(&quot;template&quot;)) {</span>
+                        return tb.process(t, InHead);
+                    } else {
+<span id="H2">                        return anythingElse(t, tb);</span>
+                    }
+                    break;
+                case EndTag:
+<span id="H1">                    Token.EndTag end = t.asEndTag();</span>
+<span id="H1">                    name = end.normalName();</span>
+<span id="H1">                    switch (name) {</span>
+                        case &quot;optgroup&quot;:
+<span id="H2">                            if (tb.currentElementIs(&quot;option&quot;) &amp;&amp; tb.aboveOnStack(tb.currentElement()) != null &amp;&amp; tb.aboveOnStack(tb.currentElement()).normalName().equals(&quot;optgroup&quot;))</span>
+                                tb.processEndTag(&quot;option&quot;);
+<span id="H2">                            if (tb.currentElementIs(&quot;optgroup&quot;))</span>
+<span id="H2">                                tb.pop();</span>
+                            else
+                                tb.error(this);
+                            break;
+                        case &quot;option&quot;:
+<span id="H1">                            if (tb.currentElementIs(&quot;option&quot;))</span>
+<span id="H1">                                tb.pop();</span>
+                            else
+                                tb.error(this);
+                            break;
+                        case &quot;select&quot;:
+<span id="H1">                            if (!tb.inSelectScope(name)) {</span>
+                                tb.error(this);
+                                return false;
+                            } else {
+<span id="H1">                                tb.popStackToClose(name);</span>
+<span id="H1">                                tb.resetInsertionMode();</span>
+                            }
+<span id="H1">                            break;</span>
+                        case &quot;template&quot;:
+                            return tb.process(t, InHead);
+                        default:
+<span id="H2">                            return anythingElse(t, tb);</span>
+                    }
+<span id="H1">                    break;</span>
+                case EOF:
+<span id="H2">                    if (!tb.currentElementIs(&quot;html&quot;))</span>
+<span id="H2">                        tb.error(this);</span>
+                    break;
+                default:
+                    return anythingElse(t, tb);
+            }
+<span id="H1">            return true;</span>
+        }
+
+        private boolean anythingElse(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            tb.error(this);</span>
+<span id="H2">            return false;</span>
+        }
+    },
+<span id="H1">    InSelectInTable {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+            if (t.isStartTag() &amp;&amp; inSorted(t.asStartTag().normalName(), InSelectTableEnd)) {
+                tb.error(this);
+                tb.popStackToClose(&quot;select&quot;);
+                tb.resetInsertionMode();
+                return tb.process(t);
+            } else if (t.isEndTag() &amp;&amp; inSorted(t.asEndTag().normalName(), InSelectTableEnd)) {
+                tb.error(this);
+                if (tb.inTableScope(t.asEndTag().normalName())) {
+                    tb.popStackToClose(&quot;select&quot;);
+                    tb.resetInsertionMode();
+                    return (tb.process(t));
+                } else
+                    return false;
+            } else {
+                return tb.process(t, InSelect);
+            }
+        }
+    },
+<span id="H1">    InTemplate {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+            final String name;
+<span id="H2">            switch (t.type) {</span>
+                case Character:
+                case Comment:
+                case Doctype:
+<span id="H2">                    tb.process(t, InBody);</span>
+<span id="H2">                    break;</span>
+                case StartTag:
+<span id="H2">                    name = t.asStartTag().normalName();</span>
+<span id="H2">                    if (inSorted(name, InTemplateToHead))</span>
+<span id="H2">                        tb.process(t, InHead);</span>
+<span id="H2">                    else if (inSorted(name, InTemplateToTable)) {</span>
+                        tb.popTemplateMode();
+                        tb.pushTemplateMode(InTable);
+                        tb.transition(InTable);
+                        return tb.process(t);
+                    }
+<span id="H2">                    else if (name.equals(&quot;col&quot;)) {</span>
+                        tb.popTemplateMode();
+                        tb.pushTemplateMode(InColumnGroup);
+                        tb.transition(InColumnGroup);
+                        return tb.process(t);
+<span id="H2">                    } else if (name.equals(&quot;tr&quot;)) {</span>
+<span id="H2">                        tb.popTemplateMode();</span>
+<span id="H2">                        tb.pushTemplateMode(InTableBody);</span>
+<span id="H2">                        tb.transition(InTableBody);</span>
+<span id="H2">                        return tb.process(t);</span>
+<span id="H2">                    } else if (name.equals(&quot;td&quot;) || name.equals(&quot;th&quot;)) {</span>
+<span id="H2">                        tb.popTemplateMode();</span>
+<span id="H2">                        tb.pushTemplateMode(InRow);</span>
+<span id="H2">                        tb.transition(InRow);</span>
+<span id="H2">                        return tb.process(t);</span>
+                    } else {
+<span id="H2">                        tb.popTemplateMode();</span>
+<span id="H2">                        tb.pushTemplateMode(InBody);</span>
+<span id="H2">                        tb.transition(InBody);</span>
+<span id="H2">                        return tb.process(t);</span>
+                    }
+
+                    break;
+                case EndTag:
+<span id="H2">                    name = t.asEndTag().normalName();</span>
+<span id="H2">                    if (name.equals(&quot;template&quot;))</span>
+<span id="H2">                        tb.process(t, InHead);</span>
+                    else {
+                        tb.error(this);
+                        return false;
+                    }
+                    break;
+                case EOF:
+<span id="H2">                    if (!tb.onStack(&quot;template&quot;)) {// stop parsing</span>
+                        return true;
+                    }
+<span id="H2">                    tb.error(this);</span>
+<span id="H2">                    tb.popStackToClose(&quot;template&quot;);</span>
+<span id="H2">                    tb.clearFormattingElementsToLastMarker();</span>
+<span id="H2">                    tb.popTemplateMode();</span>
+<span id="H2">                    tb.resetInsertionMode();</span>
+                    // spec deviation - if we did not break out of Template, stop processing, and don&#x27;t worry about cleaning up ultra-deep template stacks
+                    // limited depth because this can recurse and will blow stack if too deep
+<span id="H2">                    if (tb.state() != InTemplate &amp;&amp; tb.templateModeSize() &lt; 12)</span>
+<span id="H2">                        return tb.process(t);</span>
+                    else return true;
+            }
+<span id="H2">            return true;</span>
+        }
+    },
+<span id="H1">    AfterBody {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            Element html = tb.getFromStack(&quot;html&quot;);</span>
+<span id="H1">            if (isWhitespace(t)) {</span>
+                // spec deviation - currently body is still on stack, but we want this to go to the html node
+<span id="H2">                if (html != null)</span>
+<span id="H2">                    tb.insertCharacterToElement(t.asCharacter(), html);</span>
+                else
+                    tb.process(t, InBody); // will get into body
+<span id="H1">            } else if (t.isComment()) {</span>
+                tb.insertCommentNode(t.asComment()); // into html node
+<span id="H1">            } else if (t.isDoctype()) {</span>
+                tb.error(this);
+                return false;
+<span id="H1">            } else if (t.isStartTag() &amp;&amp; t.asStartTag().normalName().equals(&quot;html&quot;)) {</span>
+<span id="H2">                return tb.process(t, InBody);</span>
+<span id="H1">            } else if (t.isEndTag() &amp;&amp; t.asEndTag().normalName().equals(&quot;html&quot;)) {</span>
+<span id="H1">                if (tb.isFragmentParsing()) {</span>
+<span id="H2">                    tb.error(this);</span>
+<span id="H2">                    return false;</span>
+                } else {
+<span id="H1">                    if (html != null) tb.onNodeClosed(html); // track source position of close; everything is still on stack in case of trailers</span>
+<span id="H1">                    tb.transition(AfterAfterBody);</span>
+                }
+<span id="H1">            } else if (t.isEOF()) {</span>
+                // chillax! we&#x27;re done
+            } else {
+<span id="H2">                tb.error(this);</span>
+<span id="H2">                tb.resetBody();</span>
+<span id="H2">                return tb.process(t);</span>
+            }
+<span id="H1">            return true;</span>
+        }
+    },
+<span id="H1">    InFrameset {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            if (isWhitespace(t)) {</span>
+                tb.insertCharacterNode(t.asCharacter());
+<span id="H1">            } else if (t.isComment()) {</span>
+                tb.insertCommentNode(t.asComment());
+<span id="H1">            } else if (t.isDoctype()) {</span>
+                tb.error(this);
+                return false;
+<span id="H1">            } else if (t.isStartTag()) {</span>
+<span id="H1">                Token.StartTag start = t.asStartTag();</span>
+<span id="H1">                switch (start.normalName()) {</span>
+                    case &quot;html&quot;:
+                        return tb.process(start, InBody);
+                    case &quot;frameset&quot;:
+                        tb.insertElementFor(start);
+                        break;
+                    case &quot;frame&quot;:
+<span id="H1">                        tb.insertEmptyElementFor(start);</span>
+<span id="H1">                        break;</span>
+                    case &quot;noframes&quot;:
+                        return tb.process(start, InHead);
+                    default:
+                        tb.error(this);
+                        return false;
+                }
+<span id="H1">            } else if (t.isEndTag() &amp;&amp; t.asEndTag().normalName().equals(&quot;frameset&quot;)) {</span>
+<span id="H1">                if (tb.currentElementIs(&quot;html&quot;)) { // frag</span>
+                    tb.error(this);
+                    return false;
+                } else {
+<span id="H1">                    tb.pop();</span>
+<span id="H1">                    if (!tb.isFragmentParsing() &amp;&amp; !tb.currentElementIs(&quot;frameset&quot;)) {</span>
+<span id="H1">                        tb.transition(AfterFrameset);</span>
+                    }
+                }
+<span id="H1">            } else if (t.isEOF()) {</span>
+                if (!tb.currentElementIs(&quot;html&quot;)) {
+                    tb.error(this);
+                    return true;
+                }
+            } else {
+<span id="H1">                tb.error(this);</span>
+<span id="H1">                return false;</span>
+            }
+<span id="H1">            return true;</span>
+        }
+    },
+<span id="H1">    AfterFrameset {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            if (isWhitespace(t)) {</span>
+                tb.insertCharacterNode(t.asCharacter());
+<span id="H1">            } else if (t.isComment()) {</span>
+                tb.insertCommentNode(t.asComment());
+<span id="H1">            } else if (t.isDoctype()) {</span>
+                tb.error(this);
+                return false;
+<span id="H1">            } else if (t.isStartTag() &amp;&amp; t.asStartTag().normalName().equals(&quot;html&quot;)) {</span>
+                return tb.process(t, InBody);
+<span id="H1">            } else if (t.isEndTag() &amp;&amp; t.asEndTag().normalName().equals(&quot;html&quot;)) {</span>
+<span id="H1">                tb.transition(AfterAfterFrameset);</span>
+<span id="H1">            } else if (t.isStartTag() &amp;&amp; t.asStartTag().normalName().equals(&quot;noframes&quot;)) {</span>
+                return tb.process(t, InHead);
+<span id="H1">            } else if (t.isEOF()) {</span>
+                // cool your heels, we&#x27;re complete
+            } else {
+<span id="H1">                tb.error(this);</span>
+<span id="H1">                return false;</span>
+            }
+<span id="H1">            return true;</span>
+        }
+    },
+<span id="H1">    AfterAfterBody {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            if (t.isComment()) {</span>
+                tb.insertCommentNode(t.asComment());
+<span id="H1">            } else if (t.isDoctype() || (t.isStartTag() &amp;&amp; t.asStartTag().normalName().equals(&quot;html&quot;))) {</span>
+                return tb.process(t, InBody);
+<span id="H1">            } else if (isWhitespace(t)) {</span>
+                // spec deviation - body and html still on stack, but want this space to go after &lt;/html&gt;
+<span id="H2">                Element doc = tb.getDocument();</span>
+<span id="H2">                tb.insertCharacterToElement(t.asCharacter(), doc);</span>
+<span id="H1">            }else if (t.isEOF()) {</span>
+                // nice work chuck
+            } else {
+<span id="H2">                tb.error(this);</span>
+<span id="H2">                tb.resetBody();</span>
+<span id="H2">                return tb.process(t);</span>
+            }
+<span id="H1">            return true;</span>
+        }
+    },
+<span id="H1">    AfterAfterFrameset {</span>
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            if (t.isComment()) {</span>
+                tb.insertCommentNode(t.asComment());
+<span id="H1">            } else if (t.isDoctype() || isWhitespace(t) || (t.isStartTag() &amp;&amp; t.asStartTag().normalName().equals(&quot;html&quot;))) {</span>
+                return tb.process(t, InBody);
+<span id="H1">            } else if (t.isEOF()) {</span>
+                // nice work chuck
+            } else if (t.isStartTag() &amp;&amp; t.asStartTag().normalName().equals(&quot;noframes&quot;)) {
+                return tb.process(t, InHead);
+            } else {
+                tb.error(this);
+                return false;
+            }
+<span id="H1">            return true;</span>
+        }
+    },
+<span id="H1">    ForeignContent {</span>
+        // https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign
+        @Override boolean process(Token t, HtmlTreeBuilder tb) {
+<span id="H1">            switch (t.type) {</span>
+                case Character:
+<span id="H2">                    Token.Character c = t.asCharacter();</span>
+<span id="H2">                    if (c.getData().equals(nullString))</span>
+                        tb.error(this);
+<span id="H2">                    else if (HtmlTreeBuilderState.isWhitespace(c))</span>
+<span id="H2">                        tb.insertCharacterNode(c);</span>
+                    else {
+<span id="H2">                        tb.insertCharacterNode(c);</span>
+<span id="H2">                        tb.framesetOk(false);</span>
+                    }
+<span id="H2">                    break;</span>
+                case Comment:
+                    tb.insertCommentNode(t.asComment());
+                    break;
+                case Doctype:
+                    tb.error(this);
+                    break;
+                case StartTag:
+<span id="H1">                    Token.StartTag start = t.asStartTag();</span>
+<span id="H1">                    if (StringUtil.in(start.normalName, InForeignToHtml))</span>
+<span id="H2">                        return processAsHtml(t, tb);</span>
+<span id="H1">                    if (start.normalName.equals(&quot;font&quot;) &amp;&amp; (</span>
+                        start.hasAttributeIgnoreCase(&quot;color&quot;)
+                            || start.hasAttributeIgnoreCase(&quot;face&quot;)
+                            || start.hasAttributeIgnoreCase(&quot;size&quot;)))
+                        return processAsHtml(t, tb);
+
+                    // Any other start:
+                    // (whatwg says to fix up tag name and attribute case per a table - we will preserve original case instead)
+<span id="H1">                    tb.insertForeignElementFor(start, tb.currentElement().tag().namespace());</span>
+                    // (self-closing handled in insert)
+                    // if self-closing svg script -- level and execution elided
+<span id="H1">                    break;</span>
+
+                case EndTag:
+<span id="H1">                    Token.EndTag end = t.asEndTag();</span>
+<span id="H1">                    if (end.normalName.equals(&quot;br&quot;) || end.normalName.equals(&quot;p&quot;))</span>
+                        return processAsHtml(t, tb);
+<span id="H1">                    if (end.normalName.equals(&quot;script&quot;) &amp;&amp; tb.currentElementIs(&quot;script&quot;, Parser.NamespaceSvg)) {</span>
+                        // script level and execution elided.
+                        tb.pop();
+                        return true;
+                    }
+
+                    // Any other end tag
+<span id="H1">                    ArrayList&lt;Element&gt; stack = tb.getStack();</span>
+<span id="H1">                    if (stack.isEmpty())</span>
+                        Validate.wtf(&quot;Stack unexpectedly empty&quot;);
+<span id="H1">                    int i = stack.size() - 1;</span>
+<span id="H1">                    Element el = stack.get(i);</span>
+<span id="H1">                    if (!el.normalName().equals(end.normalName))</span>
+<span id="H2">                        tb.error(this);</span>
+<span id="H1">                    while (i != 0) {</span>
+<span id="H1">                        if (el.normalName().equals(end.normalName)) {</span>
+<span id="H1">                            tb.popStackToCloseAnyNamespace(el.normalName());</span>
+<span id="H1">                            return true;</span>
+                        }
+<span id="H2">                        i--;</span>
+<span id="H2">                        el = stack.get(i);</span>
+<span id="H2">                        if (el.tag().namespace().equals(Parser.NamespaceHtml)) {</span>
+<span id="H2">                            return processAsHtml(t, tb);</span>
+                        }
+                    }
+                    break;
+
+                case EOF:
+                    // won&#x27;t come through here, but for completion:
+                    break;
+            }
+<span id="H1">            return true;</span>
+        }
+
+        boolean processAsHtml(Token t, HtmlTreeBuilder tb) {
+<span id="H2">            return tb.state().process(t, tb);</span>
+        }
+    };
+
+<span id="H1">    private static final String nullString = String.valueOf(&#x27;\u0000&#x27;);</span>
+
+    abstract boolean process(Token t, HtmlTreeBuilder tb);
+
+    private static boolean isWhitespace(Token t) {
+<span id="H1">        if (t.isCharacter()) {</span>
+<span id="H2">            String data = t.asCharacter().getData();</span>
+<span id="H2">            return StringUtil.isBlank(data);</span>
+        }
+<span id="H1">        return false;</span>
+    }
+
+    private static void handleRcData(Token.StartTag startTag, HtmlTreeBuilder tb) {
+<span id="H1">        tb.tokeniser.transition(TokeniserState.Rcdata);</span>
+<span id="H1">        tb.markInsertionMode();</span>
+<span id="H1">        tb.transition(Text);</span>
+<span id="H1">        tb.insertElementFor(startTag);</span>
+<span id="H1">    }</span>
+
+    private static void handleRawtext(Token.StartTag startTag, HtmlTreeBuilder tb) {
+<span id="H2">        tb.tokeniser.transition(TokeniserState.Rawtext);</span>
+<span id="H2">        tb.markInsertionMode();</span>
+<span id="H2">        tb.transition(Text);</span>
+<span id="H2">        tb.insertElementFor(startTag);</span>
+<span id="H2">    }</span>
+
+    // lists of tags to search through
+    static final class Constants {
+<span id="H0">        static final String[] InHeadEmpty = new String[]{&quot;base&quot;, &quot;basefont&quot;, &quot;bgsound&quot;, &quot;command&quot;, &quot;link&quot;};</span>
+<span id="H0">        static final String[] InHeadRaw = new String[]{&quot;noframes&quot;, &quot;style&quot;};</span>
+<span id="H0">        static final String[] InHeadEnd = new String[]{&quot;body&quot;, &quot;br&quot;, &quot;html&quot;};</span>
+<span id="H0">        static final String[] AfterHeadBody = new String[]{&quot;body&quot;, &quot;br&quot;, &quot;html&quot;};</span>
+<span id="H0">        static final String[] BeforeHtmlToHead = new String[]{&quot;body&quot;, &quot;br&quot;, &quot;head&quot;, &quot;html&quot;, };</span>
+<span id="H0">        static final String[] InHeadNoScriptHead = new String[]{&quot;basefont&quot;, &quot;bgsound&quot;, &quot;link&quot;, &quot;meta&quot;, &quot;noframes&quot;, &quot;style&quot;};</span>
+<span id="H0">        static final String[] InBodyStartToHead = new String[]{&quot;base&quot;, &quot;basefont&quot;, &quot;bgsound&quot;, &quot;command&quot;, &quot;link&quot;, &quot;meta&quot;, &quot;noframes&quot;, &quot;script&quot;, &quot;style&quot;, &quot;template&quot;, &quot;title&quot;};</span>
+<span id="H0">        static final String[] InBodyStartPClosers = new String[]{&quot;address&quot;, &quot;article&quot;, &quot;aside&quot;, &quot;blockquote&quot;, &quot;center&quot;, &quot;details&quot;, &quot;dir&quot;, &quot;div&quot;, &quot;dl&quot;,</span>
+            &quot;fieldset&quot;, &quot;figcaption&quot;, &quot;figure&quot;, &quot;footer&quot;, &quot;header&quot;, &quot;hgroup&quot;, &quot;menu&quot;, &quot;nav&quot;, &quot;ol&quot;,
+            &quot;p&quot;, &quot;section&quot;, &quot;summary&quot;, &quot;ul&quot;};
+<span id="H0">        static final String[] Headings = new String[]{&quot;h1&quot;, &quot;h2&quot;, &quot;h3&quot;, &quot;h4&quot;, &quot;h5&quot;, &quot;h6&quot;};</span>
+<span id="H0">        static final String[] InBodyStartLiBreakers = new String[]{&quot;address&quot;, &quot;div&quot;, &quot;p&quot;};</span>
+<span id="H0">        static final String[] DdDt = new String[]{&quot;dd&quot;, &quot;dt&quot;};</span>
+<span id="H0">        static final String[] InBodyStartApplets = new String[]{&quot;applet&quot;, &quot;marquee&quot;, &quot;object&quot;};</span>
+<span id="H0">        static final String[] InBodyStartMedia = new String[]{&quot;param&quot;, &quot;source&quot;, &quot;track&quot;};</span>
+<span id="H0">        static final String[] InBodyStartInputAttribs = new String[]{&quot;action&quot;, &quot;name&quot;, &quot;prompt&quot;};</span>
+<span id="H0">        static final String[] InBodyStartDrop = new String[]{&quot;caption&quot;, &quot;col&quot;, &quot;colgroup&quot;, &quot;frame&quot;, &quot;head&quot;, &quot;tbody&quot;, &quot;td&quot;, &quot;tfoot&quot;, &quot;th&quot;, &quot;thead&quot;, &quot;tr&quot;};</span>
+<span id="H0">        static final String[] InBodyEndClosers = new String[]{&quot;address&quot;, &quot;article&quot;, &quot;aside&quot;, &quot;blockquote&quot;, &quot;button&quot;, &quot;center&quot;, &quot;details&quot;, &quot;dir&quot;, &quot;div&quot;,</span>
+            &quot;dl&quot;, &quot;fieldset&quot;, &quot;figcaption&quot;, &quot;figure&quot;, &quot;footer&quot;, &quot;header&quot;, &quot;hgroup&quot;, &quot;listing&quot;, &quot;menu&quot;,
+            &quot;nav&quot;, &quot;ol&quot;, &quot;pre&quot;, &quot;section&quot;, &quot;summary&quot;, &quot;ul&quot;};
+<span id="H0">        static final String[] InBodyEndOtherErrors = new String[] {&quot;body&quot;, &quot;dd&quot;, &quot;dt&quot;, &quot;html&quot;, &quot;li&quot;, &quot;optgroup&quot;, &quot;option&quot;, &quot;p&quot;, &quot;rb&quot;, &quot;rp&quot;, &quot;rt&quot;, &quot;rtc&quot;, &quot;tbody&quot;, &quot;td&quot;, &quot;tfoot&quot;, &quot;th&quot;, &quot;thead&quot;, &quot;tr&quot;};</span>
+<span id="H0">        static final String[] InBodyEndAdoptionFormatters = new String[]{&quot;a&quot;, &quot;b&quot;, &quot;big&quot;, &quot;code&quot;, &quot;em&quot;, &quot;font&quot;, &quot;i&quot;, &quot;nobr&quot;, &quot;s&quot;, &quot;small&quot;, &quot;strike&quot;, &quot;strong&quot;, &quot;tt&quot;, &quot;u&quot;};</span>
+<span id="H0">        static final String[] InBodyEndTableFosters = new String[]{&quot;table&quot;, &quot;tbody&quot;, &quot;tfoot&quot;, &quot;thead&quot;, &quot;tr&quot;};</span>
+<span id="H0">        static final String[] InTableToBody = new String[]{&quot;tbody&quot;, &quot;tfoot&quot;, &quot;thead&quot;};</span>
+<span id="H0">        static final String[] InTableAddBody = new String[]{&quot;td&quot;, &quot;th&quot;, &quot;tr&quot;};</span>
+<span id="H0">        static final String[] InTableToHead = new String[]{&quot;script&quot;, &quot;style&quot;, &quot;template&quot;};</span>
+<span id="H0">        static final String[] InCellNames = new String[]{&quot;td&quot;, &quot;th&quot;};</span>
+<span id="H0">        static final String[] InCellBody = new String[]{&quot;body&quot;, &quot;caption&quot;, &quot;col&quot;, &quot;colgroup&quot;, &quot;html&quot;};</span>
+<span id="H0">        static final String[] InCellTable = new String[]{ &quot;table&quot;, &quot;tbody&quot;, &quot;tfoot&quot;, &quot;thead&quot;, &quot;tr&quot;};</span>
+<span id="H0">        static final String[] InCellCol = new String[]{&quot;caption&quot;, &quot;col&quot;, &quot;colgroup&quot;, &quot;tbody&quot;, &quot;td&quot;, &quot;tfoot&quot;, &quot;th&quot;, &quot;thead&quot;, &quot;tr&quot;};</span>
+<span id="H0">        static final String[] InTableEndErr = new String[]{&quot;body&quot;, &quot;caption&quot;, &quot;col&quot;, &quot;colgroup&quot;, &quot;html&quot;, &quot;tbody&quot;, &quot;td&quot;, &quot;tfoot&quot;, &quot;th&quot;, &quot;thead&quot;, &quot;tr&quot;};</span>
+<span id="H0">        static final String[] InTableFoster = new String[]{&quot;table&quot;, &quot;tbody&quot;, &quot;tfoot&quot;, &quot;thead&quot;, &quot;tr&quot;};</span>
+<span id="H0">        static final String[] InTableBodyExit = new String[]{&quot;caption&quot;, &quot;col&quot;, &quot;colgroup&quot;, &quot;tbody&quot;, &quot;tfoot&quot;, &quot;thead&quot;};</span>
+<span id="H0">        static final String[] InTableBodyEndIgnore = new String[]{&quot;body&quot;, &quot;caption&quot;, &quot;col&quot;, &quot;colgroup&quot;, &quot;html&quot;, &quot;td&quot;, &quot;th&quot;, &quot;tr&quot;};</span>
+<span id="H0">        static final String[] InRowMissing = new String[]{&quot;caption&quot;, &quot;col&quot;, &quot;colgroup&quot;, &quot;tbody&quot;, &quot;tfoot&quot;, &quot;thead&quot;, &quot;tr&quot;};</span>
+<span id="H0">        static final String[] InRowIgnore = new String[]{&quot;body&quot;, &quot;caption&quot;, &quot;col&quot;, &quot;colgroup&quot;, &quot;html&quot;, &quot;td&quot;, &quot;th&quot;};</span>
+<span id="H0">        static final String[] InSelectEnd = new String[]{&quot;input&quot;, &quot;keygen&quot;, &quot;textarea&quot;};</span>
+<span id="H0">        static final String[] InSelectTableEnd = new String[]{&quot;caption&quot;, &quot;table&quot;, &quot;tbody&quot;, &quot;td&quot;, &quot;tfoot&quot;, &quot;th&quot;, &quot;thead&quot;, &quot;tr&quot;};</span>
+<span id="H0">        static final String[] InTableEndIgnore = new String[]{&quot;tbody&quot;, &quot;tfoot&quot;, &quot;thead&quot;};</span>
+<span id="H0">        static final String[] InHeadNoscriptIgnore = new String[]{&quot;head&quot;, &quot;noscript&quot;};</span>
+<span id="H0">        static final String[] InCaptionIgnore = new String[]{&quot;body&quot;, &quot;col&quot;, &quot;colgroup&quot;, &quot;html&quot;, &quot;tbody&quot;, &quot;td&quot;, &quot;tfoot&quot;, &quot;th&quot;, &quot;thead&quot;, &quot;tr&quot;};</span>
+<span id="H0">        static final String[] InTemplateToHead = new String[] {&quot;base&quot;, &quot;basefont&quot;, &quot;bgsound&quot;, &quot;link&quot;, &quot;meta&quot;, &quot;noframes&quot;, &quot;script&quot;, &quot;style&quot;, &quot;template&quot;, &quot;title&quot;};</span>
+<span id="H0">        static final String[] InTemplateToTable = new String[] {&quot;caption&quot;, &quot;colgroup&quot;, &quot;tbody&quot;, &quot;tfoot&quot;, &quot;thead&quot;};</span>
+<span id="H0">        static final String[] InForeignToHtml = new String[] {&quot;b&quot;, &quot;big&quot;, &quot;blockquote&quot;, &quot;body&quot;, &quot;br&quot;, &quot;center&quot;, &quot;code&quot;, &quot;dd&quot;, &quot;div&quot;, &quot;dl&quot;, &quot;dt&quot;, &quot;em&quot;, &quot;embed&quot;, &quot;h1&quot;, &quot;h2&quot;, &quot;h3&quot;, &quot;h4&quot;, &quot;h5&quot;, &quot;h6&quot;, &quot;head&quot;, &quot;hr&quot;, &quot;i&quot;, &quot;img&quot;, &quot;li&quot;, &quot;listing&quot;, &quot;menu&quot;, &quot;meta&quot;, &quot;nobr&quot;, &quot;ol&quot;, &quot;p&quot;, &quot;pre&quot;, &quot;ruby&quot;, &quot;s&quot;, &quot;small&quot;, &quot;span&quot;, &quot;strike&quot;, &quot;strong&quot;, &quot;sub&quot;, &quot;sup&quot;, &quot;table&quot;, &quot;tt&quot;, &quot;u&quot;, &quot;ul&quot;, &quot;var&quot;};</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

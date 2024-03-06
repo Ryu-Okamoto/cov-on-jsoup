@@ -1,0 +1,78 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/select/NodeFilter.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">select</a>/NodeFilter.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.select;
+
+import org.jsoup.nodes.Node;
+
+/**
+ * Node filter interface. Provide an implementing class to {@link NodeTraversor} to iterate through nodes.
+ * &lt;p&gt;
+ * This interface provides two methods, {@code head} and {@code tail}. The head method is called when the node is first
+ * seen, and the tail method when all of the node&#x27;s children have been visited. As an example, head can be used to
+ * create a start tag for a node, and tail to create the end tag.
+ * &lt;/p&gt;
+ * &lt;p&gt;
+ * For every node, the filter has to decide whether to:
+ * &lt;ul&gt;
+ * &lt;li&gt;continue ({@link FilterResult#CONTINUE}),&lt;/li&gt;
+ * &lt;li&gt;skip all children ({@link FilterResult#SKIP_CHILDREN}),&lt;/li&gt;
+ * &lt;li&gt;skip node entirely ({@link FilterResult#SKIP_ENTIRELY}),&lt;/li&gt;
+ * &lt;li&gt;remove the subtree ({@link FilterResult#REMOVE}),&lt;/li&gt;
+ * &lt;li&gt;interrupt the iteration and return ({@link FilterResult#STOP}).&lt;/li&gt;
+ * &lt;/ul&gt;
+ * The difference between {@link FilterResult#SKIP_CHILDREN} and {@link FilterResult#SKIP_ENTIRELY} is that the first
+ * will invoke {@link NodeFilter#tail(Node, int)} on the node, while the latter will not.
+ * Within {@link NodeFilter#tail(Node, int)}, both are equivalent to {@link FilterResult#CONTINUE}.
+ * &lt;/p&gt;
+ */
+public interface NodeFilter {
+    /**
+     * Filter decision.
+     */
+<span id="H1">    enum FilterResult {</span>
+        /** Continue processing the tree */
+<span id="H1">        CONTINUE,</span>
+        /** Skip the child nodes, but do call {@link NodeFilter#tail(Node, int)} next. */
+<span id="H1">        SKIP_CHILDREN,</span>
+        /** Skip the subtree, and do not call {@link NodeFilter#tail(Node, int)}. */
+<span id="H1">        SKIP_ENTIRELY,</span>
+        /** Remove the node and its children */
+<span id="H1">        REMOVE,</span>
+        /** Stop processing */
+<span id="H1">        STOP</span>
+    }
+
+    /**
+     * Callback for when a node is first visited.
+     * @param node the node being visited.
+     * @param depth the depth of the node, relative to the root node. E.g., the root node has depth 0, and a child node of that will have depth 1.
+     * @return Filter decision
+     */
+    FilterResult head(Node node, int depth);
+
+    /**
+     * Callback for when a node is last visited, after all of its descendants have been visited.
+     * &lt;p&gt;This method has a default implementation to return {@link FilterResult#CONTINUE}.&lt;/p&gt;
+     * @param node the node being visited.
+     * @param depth the depth of the node, relative to the root node. E.g., the root node has depth 0, and a child node of that will have depth 1.
+     * @return Filter decision
+     */
+    default FilterResult tail(Node node, int depth) {
+<span id="H1">        return FilterResult.CONTINUE;</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

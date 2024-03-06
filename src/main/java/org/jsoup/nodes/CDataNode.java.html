@@ -1,0 +1,60 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/nodes/CDataNode.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">nodes</a>/CDataNode.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.nodes;
+
+import java.io.IOException;
+
+/**
+ * A Character Data node, to support CDATA sections.
+ */
+public class CDataNode extends TextNode {
+    public CDataNode(String text) {
+<span id="H1">        super(text);</span>
+<span id="H1">    }</span>
+
+    @Override
+    public String nodeName() {
+<span id="H1">        return &quot;#cdata&quot;;</span>
+    }
+
+    /**
+     * Get the unencoded, &lt;b&gt;non-normalized&lt;/b&gt; text content of this CDataNode.
+     * @return unencoded, non-normalized text
+     */
+    @Override
+    public String text() {
+<span id="H1">        return getWholeText();</span>
+    }
+
+    @Override
+    void outerHtmlHead(Appendable accum, int depth, Document.OutputSettings out) throws IOException {
+<span id="H1">        accum</span>
+<span id="H1">            .append(&quot;&lt;![CDATA[&quot;)</span>
+<span id="H1">            .append(getWholeText());</span>
+<span id="H1">    }</span>
+
+    @Override
+    void outerHtmlTail(Appendable accum, int depth, Document.OutputSettings out) throws IOException {
+<span id="H1">        accum.append(&quot;]]&gt;&quot;);</span>
+<span id="H1">    }</span>
+
+    @Override
+    public CDataNode clone() {
+        return (CDataNode) super.clone();
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

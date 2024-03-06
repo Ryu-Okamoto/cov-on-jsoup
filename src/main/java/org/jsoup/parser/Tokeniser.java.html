@@ -1,0 +1,382 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/parser/Tokeniser.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">parser</a>/Tokeniser.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.parser;
+
+import org.jsoup.helper.Validate;
+import org.jsoup.internal.StringUtil;
+import org.jsoup.nodes.Entities;
+import org.jspecify.annotations.Nullable;
+
+import java.util.Arrays;
+
+/**
+ * Readers the input stream into tokens.
+ */
+<span id="H0">final class Tokeniser {</span>
+    static final char replacementChar = &#x27;\uFFFD&#x27;; // replaces null character
+<span id="H0">    private static final char[] notCharRefCharsSorted = new char[]{&#x27;\t&#x27;, &#x27;\n&#x27;, &#x27;\r&#x27;, &#x27;\f&#x27;, &#x27; &#x27;, &#x27;&lt;&#x27;, &#x27;&amp;&#x27;};</span>
+
+    // Some illegal character escapes are parsed by browsers as windows-1252 instead. See issue #1034
+    // https://html.spec.whatwg.org/multipage/parsing.html#numeric-character-reference-end-state
+    static final int win1252ExtensionsStart = 0x80;
+<span id="H0">    static final int[] win1252Extensions = new int[] {</span>
+            // we could build this manually, but Windows-1252 is not a standard java charset so that could break on
+            // some platforms - this table is verified with a test
+            0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+            0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+            0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+            0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178,
+    };
+
+    static {
+<span id="H0">        Arrays.sort(notCharRefCharsSorted);</span>
+<span id="H0">    }</span>
+
+    private final CharacterReader reader; // html input
+    private final ParseErrorList errors; // errors found while tokenising
+
+<span id="H1">    private TokeniserState state = TokeniserState.Data; // current tokenisation state</span>
+<span id="H1">    @Nullable private Token emitPending = null; // the token we are about to emit on next read</span>
+<span id="H1">    private boolean isEmitPending = false;</span>
+<span id="H1">    @Nullable private String charsString = null; // characters pending an emit. Will fall to charsBuilder if more than one</span>
+<span id="H1">    private final StringBuilder charsBuilder = new StringBuilder(1024); // buffers characters to output as one token, if more than one emit per read</span>
+<span id="H1">    final StringBuilder dataBuffer = new StringBuilder(1024); // buffers data looking for &lt;/script&gt;</span>
+
+    final Token.StartTag startPending;
+    final Token.EndTag endPending;
+    Token.Tag tagPending; // tag we are building up: start or end pending
+<span id="H1">    final Token.Character charPending = new Token.Character();</span>
+<span id="H1">    final Token.Doctype doctypePending = new Token.Doctype(); // doctype building up</span>
+<span id="H1">    final Token.Comment commentPending = new Token.Comment(); // comment building up</span>
+    @Nullable private String lastStartTag; // the last start tag emitted, to test appropriate end tag
+    @Nullable private String lastStartCloseSeq; // &quot;&lt;/&quot; + lastStartTag, so we can quickly check for that in RCData
+
+    private static final int Unset = -1;
+<span id="H1">    private int markupStartPos, charStartPos = Unset; // reader pos at the start of markup / characters. updated on state transition</span>
+
+<span id="H1">    Tokeniser(TreeBuilder treeBuilder) {</span>
+<span id="H1">        tagPending = startPending  = new Token.StartTag(treeBuilder);</span>
+<span id="H1">        endPending = new Token.EndTag(treeBuilder);</span>
+<span id="H1">        this.reader = treeBuilder.reader;</span>
+<span id="H1">        this.errors = treeBuilder.parser.getErrors();</span>
+<span id="H1">    }</span>
+
+    Token read() {
+<span id="H1">        while (!isEmitPending) {</span>
+<span id="H1">            state.read(this, reader);</span>
+        }
+
+        // if emit is pending, a non-character token was found: return any chars in buffer, and leave token for next read:
+<span id="H1">        final StringBuilder cb = this.charsBuilder;</span>
+<span id="H1">        if (cb.length() != 0) {</span>
+<span id="H1">            String str = cb.toString();</span>
+<span id="H1">            cb.delete(0, cb.length());</span>
+<span id="H1">            Token token = charPending.data(str);</span>
+<span id="H1">            charsString = null;</span>
+<span id="H1">            return token;</span>
+<span id="H1">        } else if (charsString != null) {</span>
+<span id="H1">            Token token = charPending.data(charsString);</span>
+<span id="H1">            charsString = null;</span>
+<span id="H1">            return token;</span>
+        } else {
+<span id="H1">            isEmitPending = false;</span>
+<span id="H1">            assert emitPending != null;</span>
+<span id="H1">            return emitPending;</span>
+        }
+    }
+
+    void emit(Token token) {
+<span id="H1">        Validate.isFalse(isEmitPending);</span>
+
+<span id="H1">        emitPending = token;</span>
+<span id="H1">        isEmitPending = true;</span>
+<span id="H1">        token.startPos(markupStartPos);</span>
+<span id="H1">        token.endPos(reader.pos());</span>
+<span id="H1">        charStartPos = Unset;</span>
+
+<span id="H1">        if (token.type == Token.TokenType.StartTag) {</span>
+<span id="H1">            Token.StartTag startTag = (Token.StartTag) token;</span>
+<span id="H1">            lastStartTag = startTag.tagName;</span>
+<span id="H1">            lastStartCloseSeq = null; // only lazy inits</span>
+<span id="H1">        } else if (token.type == Token.TokenType.EndTag) {</span>
+<span id="H1">            Token.EndTag endTag = (Token.EndTag) token;</span>
+<span id="H1">            if (endTag.hasAttributes())</span>
+<span id="H2">                error(&quot;Attributes incorrectly present on end tag [/%s]&quot;, endTag.normalName());</span>
+        }
+<span id="H1">    }</span>
+
+    void emit(final String str) {
+        // buffer strings up until last string token found, to emit only one token for a run of character refs etc.
+        // does not set isEmitPending; read checks that
+<span id="H1">        if (charsString == null) {</span>
+<span id="H1">            charsString = str;</span>
+        } else {
+<span id="H1">            if (charsBuilder.length() == 0) { // switching to string builder as more than one emit before read</span>
+<span id="H1">                charsBuilder.append(charsString);</span>
+            }
+<span id="H1">            charsBuilder.append(str);</span>
+        }
+<span id="H1">        charPending.startPos(charStartPos);</span>
+<span id="H1">        charPending.endPos(reader.pos());</span>
+<span id="H1">    }</span>
+
+    // variations to limit need to create temp strings
+    void emit(final StringBuilder str) {
+<span id="H1">        if (charsString == null) {</span>
+            charsString = str.toString();
+        } else {
+<span id="H1">            if (charsBuilder.length() == 0) {</span>
+                charsBuilder.append(charsString);
+            }
+<span id="H1">            charsBuilder.append(str);</span>
+        }
+<span id="H1">        charPending.startPos(charStartPos);</span>
+<span id="H1">        charPending.endPos(reader.pos());</span>
+<span id="H1">    }</span>
+
+    void emit(char c) {
+<span id="H1">        if (charsString == null) {</span>
+<span id="H2">            charsString = String.valueOf(c);</span>
+        } else {
+<span id="H1">            if (charsBuilder.length() == 0) {</span>
+<span id="H1">                charsBuilder.append(charsString);</span>
+            }
+<span id="H1">            charsBuilder.append(c);</span>
+        }
+<span id="H1">        charPending.startPos(charStartPos);</span>
+<span id="H1">        charPending.endPos(reader.pos());</span>
+<span id="H1">    }</span>
+
+    void emit(char[] chars) {
+        emit(String.valueOf(chars));
+    }
+
+    void emit(int[] codepoints) {
+<span id="H1">        emit(new String(codepoints, 0, codepoints.length));</span>
+<span id="H1">    }</span>
+
+    TokeniserState getState() {
+        return state;
+    }
+
+    void transition(TokeniserState newState) {
+        // track markup / data position on state transitions
+<span id="H1">        switch (newState) {</span>
+            case TagOpen:
+<span id="H1">                markupStartPos = reader.pos();</span>
+<span id="H1">                break;</span>
+            case Data:
+<span id="H1">                if (charStartPos == Unset) // don&#x27;t reset when we are jumping between e.g data -&gt; char ref -&gt; data</span>
+<span id="H1">                    charStartPos = reader.pos();</span>
+        }
+
+<span id="H1">        this.state = newState;</span>
+<span id="H1">    }</span>
+
+    void advanceTransition(TokeniserState newState) {
+<span id="H1">        transition(newState);</span>
+<span id="H1">        reader.advance();</span>
+<span id="H1">    }</span>
+
+<span id="H1">    final private int[] codepointHolder = new int[1]; // holder to not have to keep creating arrays</span>
+<span id="H1">    final private int[] multipointHolder = new int[2];</span>
+    @Nullable int[] consumeCharacterReference(@Nullable Character additionalAllowedCharacter, boolean inAttribute) {
+<span id="H1">        if (reader.isEmpty())</span>
+            return null;
+<span id="H1">        if (additionalAllowedCharacter != null &amp;&amp; additionalAllowedCharacter == reader.current())</span>
+<span id="H3">            return null;</span>
+<span id="H1">        if (reader.matchesAnySorted(notCharRefCharsSorted))</span>
+<span id="H2">            return null;</span>
+
+<span id="H1">        final int[] codeRef = codepointHolder;</span>
+<span id="H1">        reader.mark();</span>
+<span id="H1">        if (reader.matchConsume(&quot;#&quot;)) { // numbered</span>
+<span id="H1">            boolean isHexMode = reader.matchConsumeIgnoreCase(&quot;X&quot;);</span>
+<span id="H1">            String numRef = isHexMode ? reader.consumeHexSequence() : reader.consumeDigitSequence();</span>
+<span id="H1">            if (numRef.length() == 0) { // didn&#x27;t match anything</span>
+                characterReferenceError(&quot;numeric reference with no numerals&quot;);
+                reader.rewindToMark();
+                return null;
+            }
+
+<span id="H1">            reader.unmark();</span>
+<span id="H1">            if (!reader.matchConsume(&quot;;&quot;))</span>
+<span id="H2">                characterReferenceError(&quot;missing semicolon on [&amp;#%s]&quot;, numRef); // missing semi</span>
+<span id="H1">            int charval = -1;</span>
+            try {
+<span id="H1">                int base = isHexMode ? 16 : 10;</span>
+<span id="H1">                charval = Integer.valueOf(numRef, base);</span>
+            } catch (NumberFormatException ignored) {
+<span id="H1">            } // skip</span>
+<span id="H1">            if (charval == -1 || (charval &gt;= 0xD800 &amp;&amp; charval &lt;= 0xDFFF) || charval &gt; 0x10FFFF) {</span>
+<span id="H3">                characterReferenceError(&quot;character [%s] outside of valid range&quot;, charval);</span>
+<span id="H3">                codeRef[0] = replacementChar;</span>
+            } else {
+                // fix illegal unicode characters to match browser behavior
+<span id="H1">                if (charval &gt;= win1252ExtensionsStart &amp;&amp; charval &lt; win1252ExtensionsStart + win1252Extensions.length) {</span>
+<span id="H1">                    characterReferenceError(&quot;character [%s] is not a valid unicode code point&quot;, charval);</span>
+<span id="H1">                    charval = win1252Extensions[charval - win1252ExtensionsStart];</span>
+                }
+
+                // todo: implement number replacement table
+                // todo: check for extra illegal unicode points as parse errors
+<span id="H1">                codeRef[0] = charval;</span>
+            }
+<span id="H1">            return codeRef;</span>
+        } else { // named
+            // get as many letters as possible, and look for matching entities.
+<span id="H1">            String nameRef = reader.consumeLetterThenDigitSequence();</span>
+<span id="H1">            boolean looksLegit = reader.matches(&#x27;;&#x27;);</span>
+            // found if a base named entity without a ;, or an extended entity with the ;.
+<span id="H1">            boolean found = (Entities.isBaseNamedEntity(nameRef) || (Entities.isNamedEntity(nameRef) &amp;&amp; looksLegit));</span>
+
+<span id="H1">            if (!found) {</span>
+<span id="H1">                reader.rewindToMark();</span>
+<span id="H1">                if (looksLegit) // named with semicolon</span>
+<span id="H2">                    characterReferenceError(&quot;invalid named reference [%s]&quot;, nameRef);</span>
+<span id="H1">                return null;</span>
+            }
+<span id="H1">            if (inAttribute &amp;&amp; (reader.matchesLetter() || reader.matchesDigit() || reader.matchesAny(&#x27;=&#x27;, &#x27;-&#x27;, &#x27;_&#x27;))) {</span>
+                // don&#x27;t want that to match
+<span id="H1">                reader.rewindToMark();</span>
+<span id="H1">                return null;</span>
+            }
+
+<span id="H1">            reader.unmark();</span>
+<span id="H1">            if (!reader.matchConsume(&quot;;&quot;))</span>
+<span id="H1">                characterReferenceError(&quot;missing semicolon on [&amp;%s]&quot;, nameRef); // missing semi</span>
+<span id="H1">            int numChars = Entities.codepointsForName(nameRef, multipointHolder);</span>
+<span id="H1">            if (numChars == 1) {</span>
+<span id="H1">                codeRef[0] = multipointHolder[0];</span>
+<span id="H1">                return codeRef;</span>
+<span id="H1">            } else if (numChars ==2) {</span>
+<span id="H1">                return multipointHolder;</span>
+            } else {
+                Validate.fail(&quot;Unexpected characters returned for &quot; + nameRef);
+                return multipointHolder;
+            }
+        }
+    }
+
+    Token.Tag createTagPending(boolean start) {
+<span id="H1">        tagPending = start ? startPending.reset() : endPending.reset();</span>
+<span id="H1">        return tagPending;</span>
+    }
+
+    void emitTagPending() {
+<span id="H1">        tagPending.finaliseTag();</span>
+<span id="H1">        emit(tagPending);</span>
+<span id="H1">    }</span>
+
+    void createCommentPending() {
+<span id="H2">        commentPending.reset();</span>
+<span id="H2">    }</span>
+
+    void emitCommentPending() {
+<span id="H1">        emit(commentPending);</span>
+<span id="H1">    }</span>
+
+    void createBogusCommentPending() {
+<span id="H1">        commentPending.reset();</span>
+<span id="H1">        commentPending.bogus = true;</span>
+<span id="H1">    }</span>
+
+    void createDoctypePending() {
+<span id="H2">        doctypePending.reset();</span>
+<span id="H2">    }</span>
+
+    void emitDoctypePending() {
+<span id="H2">        emit(doctypePending);</span>
+<span id="H2">    }</span>
+
+    void createTempBuffer() {
+<span id="H1">        Token.reset(dataBuffer);</span>
+<span id="H1">    }</span>
+
+    boolean isAppropriateEndTagToken() {
+<span id="H1">        return lastStartTag != null &amp;&amp; tagPending.name().equalsIgnoreCase(lastStartTag);</span>
+    }
+
+    @Nullable String appropriateEndTagName() {
+<span id="H1">        return lastStartTag; // could be null</span>
+    }
+
+    /** Returns the closer sequence {@code &lt;/lastStart} */
+    String appropriateEndTagSeq() {
+<span id="H1">        if (lastStartCloseSeq == null) // reset on start tag emit</span>
+<span id="H1">            lastStartCloseSeq = &quot;&lt;/&quot; + lastStartTag;</span>
+<span id="H1">        return lastStartCloseSeq;</span>
+    }
+
+    void error(TokeniserState state) {
+<span id="H1">        if (errors.canAddError())</span>
+<span id="H1">            errors.add(new ParseError(reader, &quot;Unexpected character &#x27;%s&#x27; in input state [%s]&quot;, reader.current(), state));</span>
+<span id="H1">    }</span>
+
+    void eofError(TokeniserState state) {
+<span id="H1">        if (errors.canAddError())</span>
+<span id="H3">            errors.add(new ParseError(reader, &quot;Unexpectedly reached end of file (EOF) in input state [%s]&quot;, state));</span>
+<span id="H1">    }</span>
+
+    private void characterReferenceError(String message, Object... args) {
+<span id="H1">        if (errors.canAddError())</span>
+<span id="H1">            errors.add(new ParseError(reader, String.format(&quot;Invalid character reference: &quot; + message, args)));</span>
+<span id="H1">    }</span>
+
+    void error(String errorMsg) {
+        if (errors.canAddError())
+            errors.add(new ParseError(reader, errorMsg));
+    }
+
+    void error(String errorMsg, Object... args) {
+<span id="H1">        if (errors.canAddError())</span>
+<span id="H2">            errors.add(new ParseError(reader, errorMsg, args));</span>
+<span id="H1">    }</span>
+
+    static boolean currentNodeInHtmlNS() {
+        // todo: implement namespaces correctly
+        return true;
+        // Element currentNode = currentNode();
+        // return currentNode != null &amp;&amp; currentNode.namespace().equals(&quot;HTML&quot;);
+    }
+
+    /**
+     * Utility method to consume reader and unescape entities found within.
+     * @param inAttribute if the text to be unescaped is in an attribute
+     * @return unescaped string from reader
+     */
+    String unescapeEntities(boolean inAttribute) {
+<span id="H1">        StringBuilder builder = StringUtil.borrowBuilder();</span>
+<span id="H1">        while (!reader.isEmpty()) {</span>
+<span id="H1">            builder.append(reader.consumeTo(&#x27;&amp;&#x27;));</span>
+<span id="H1">            if (reader.matches(&#x27;&amp;&#x27;)) {</span>
+<span id="H1">                reader.consume();</span>
+<span id="H1">                int[] c = consumeCharacterReference(null, inAttribute);</span>
+<span id="H1">                if (c == null || c.length==0)</span>
+<span id="H1">                    builder.append(&#x27;&amp;&#x27;);</span>
+                else {
+<span id="H1">                    builder.appendCodePoint(c[0]);</span>
+<span id="H1">                    if (c.length == 2)</span>
+<span id="H1">                        builder.appendCodePoint(c[1]);</span>
+                }
+
+<span id="H1">            }</span>
+        }
+<span id="H1">        return StringUtil.releaseBuilder(builder);</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

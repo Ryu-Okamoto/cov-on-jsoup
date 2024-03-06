@@ -1,0 +1,457 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/select/QueryParser.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">select</a>/QueryParser.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.select;
+
+import org.jsoup.internal.StringUtil;
+import org.jsoup.helper.Validate;
+import org.jsoup.parser.TokenQueue;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import static org.jsoup.select.StructuralEvaluator.ImmediateParentRun;
+import static org.jsoup.internal.Normalizer.normalize;
+
+/**
+ * Parses a CSS selector into an Evaluator tree.
+ */
+<span id="H1">public class QueryParser {</span>
+<span id="H1">    private final static char[] Combinators = {&#x27;,&#x27;, &#x27;&gt;&#x27;, &#x27;+&#x27;, &#x27;~&#x27;, &#x27; &#x27;};</span>
+<span id="H1">    private final static String[] AttributeEvals = new String[]{&quot;=&quot;, &quot;!=&quot;, &quot;^=&quot;, &quot;$=&quot;, &quot;*=&quot;, &quot;~=&quot;};</span>
+
+    private final TokenQueue tq;
+    private final String query;
+<span id="H1">    private final List&lt;Evaluator&gt; evals = new ArrayList&lt;&gt;();</span>
+
+    /**
+     * Create a new QueryParser.
+     * @param query CSS query
+     */
+<span id="H1">    private QueryParser(String query) {</span>
+<span id="H2">        Validate.notEmpty(query);</span>
+<span id="H2">        query = query.trim();</span>
+<span id="H2">        this.query = query;</span>
+<span id="H2">        this.tq = new TokenQueue(query);</span>
+<span id="H2">    }</span>
+
+    /**
+     * Parse a CSS query into an Evaluator.
+     * @param query CSS query
+     * @return Evaluator
+     * @see Selector selector query syntax
+     */
+    public static Evaluator parse(String query) {
+        try {
+<span id="H2">            QueryParser p = new QueryParser(query);</span>
+<span id="H2">            return p.parse();</span>
+<span id="H1">        } catch (IllegalArgumentException e) {</span>
+<span id="H1">            throw new Selector.SelectorParseException(e.getMessage());</span>
+        }
+    }
+
+    /**
+     * Parse the query
+     * @return Evaluator
+     */
+    Evaluator parse() {
+<span id="H2">        tq.consumeWhitespace();</span>
+
+<span id="H2">        if (tq.matchesAny(Combinators)) { // if starts with a combinator, use root as elements</span>
+<span id="H2">            evals.add(new StructuralEvaluator.Root());</span>
+<span id="H2">            combinator(tq.consume());</span>
+        } else {
+<span id="H2">            evals.add(consumeEvaluator());</span>
+        }
+
+<span id="H2">        while (!tq.isEmpty()) {</span>
+            // hierarchy and extras
+<span id="H2">            boolean seenWhite = tq.consumeWhitespace();</span>
+
+<span id="H2">            if (tq.matchesAny(Combinators)) {</span>
+<span id="H2">                combinator(tq.consume());</span>
+<span id="H2">            } else if (seenWhite) {</span>
+<span id="H2">                combinator(&#x27; &#x27;);</span>
+            } else { // E.class, E#id, E[attr] etc. AND
+<span id="H2">                evals.add(consumeEvaluator()); // take next el, #. etc off queue</span>
+            }
+<span id="H2">        }</span>
+
+<span id="H2">        if (evals.size() == 1)</span>
+<span id="H2">            return evals.get(0);</span>
+
+<span id="H2">        return new CombiningEvaluator.And(evals);</span>
+    }
+
+    private void combinator(char combinator) {
+<span id="H2">        tq.consumeWhitespace();</span>
+<span id="H2">        String subQuery = consumeSubQuery(); // support multi &gt; childs</span>
+
+        Evaluator rootEval; // the new topmost evaluator
+        Evaluator currentEval; // the evaluator the new eval will be combined to. could be root, or rightmost or.
+<span id="H2">        Evaluator newEval = parse(subQuery); // the evaluator to add into target evaluator</span>
+<span id="H2">        boolean replaceRightMost = false;</span>
+
+<span id="H2">        if (evals.size() == 1) {</span>
+<span id="H2">            rootEval = currentEval = evals.get(0);</span>
+            // make sure OR (,) has precedence:
+<span id="H2">            if (rootEval instanceof CombiningEvaluator.Or &amp;&amp; combinator != &#x27;,&#x27;) {</span>
+<span id="H2">                currentEval = ((CombiningEvaluator.Or) currentEval).rightMostEvaluator();</span>
+<span id="H2">                assert currentEval != null; // rightMost signature can return null (if none set), but always will have one by this point</span>
+<span id="H2">                replaceRightMost = true;</span>
+            }
+        }
+        else {
+<span id="H2">            rootEval = currentEval = new CombiningEvaluator.And(evals);</span>
+        }
+<span id="H2">        evals.clear();</span>
+
+        // for most combinators: change the current eval into an AND of the current eval and the new eval
+<span id="H2">        switch (combinator) {</span>
+            case &#x27;&gt;&#x27;:
+<span id="H2">                ImmediateParentRun run = currentEval instanceof ImmediateParentRun ?</span>
+<span id="H2">                        (ImmediateParentRun) currentEval : new ImmediateParentRun(currentEval);</span>
+<span id="H2">                run.add(newEval);</span>
+<span id="H2">                currentEval = run;</span>
+<span id="H2">                break;</span>
+            case &#x27; &#x27;:
+<span id="H2">                currentEval = new CombiningEvaluator.And(new StructuralEvaluator.Parent(currentEval), newEval);</span>
+<span id="H2">                break;</span>
+            case &#x27;+&#x27;:
+<span id="H2">                currentEval = new CombiningEvaluator.And(new StructuralEvaluator.ImmediatePreviousSibling(currentEval), newEval);</span>
+<span id="H2">                break;</span>
+            case &#x27;~&#x27;:
+<span id="H2">                currentEval = new CombiningEvaluator.And(new StructuralEvaluator.PreviousSibling(currentEval), newEval);</span>
+<span id="H2">                break;</span>
+            case &#x27;,&#x27;:
+                CombiningEvaluator.Or or;
+<span id="H2">                if (currentEval instanceof CombiningEvaluator.Or) {</span>
+<span id="H2">                    or = (CombiningEvaluator.Or) currentEval;</span>
+                } else {
+<span id="H2">                    or = new CombiningEvaluator.Or();</span>
+<span id="H2">                    or.add(currentEval);</span>
+                }
+<span id="H2">                or.add(newEval);</span>
+<span id="H2">                currentEval = or;</span>
+<span id="H2">                break;</span>
+            default:
+                throw new Selector.SelectorParseException(&quot;Unknown combinator &#x27;%s&#x27;&quot;, combinator);
+        }
+
+<span id="H2">        if (replaceRightMost)</span>
+<span id="H2">            ((CombiningEvaluator.Or) rootEval).replaceRightMostEvaluator(currentEval);</span>
+<span id="H2">        else rootEval = currentEval;</span>
+<span id="H2">        evals.add(rootEval);</span>
+<span id="H2">    }</span>
+
+    private String consumeSubQuery() {
+<span id="H2">        StringBuilder sq = StringUtil.borrowBuilder();</span>
+<span id="H2">        boolean seenNonCombinator = false; // eat until we hit a combinator after eating something else</span>
+<span id="H2">        while (!tq.isEmpty()) {</span>
+<span id="H2">            if (tq.matches(&quot;(&quot;))</span>
+<span id="H2">                sq.append(&quot;(&quot;).append(tq.chompBalanced(&#x27;(&#x27;, &#x27;)&#x27;)).append(&quot;)&quot;);</span>
+<span id="H2">            else if (tq.matches(&quot;[&quot;))</span>
+<span id="H2">                sq.append(&quot;[&quot;).append(tq.chompBalanced(&#x27;[&#x27;, &#x27;]&#x27;)).append(&quot;]&quot;);</span>
+<span id="H2">            else if (tq.matchesAny(Combinators))</span>
+<span id="H2">                if (seenNonCombinator)</span>
+<span id="H2">                    break;</span>
+                else
+<span id="H2">                    sq.append(tq.consume());</span>
+            else {
+<span id="H2">                seenNonCombinator = true;</span>
+<span id="H2">                sq.append(tq.consume());</span>
+            }
+        }
+<span id="H2">        return StringUtil.releaseBuilder(sq);</span>
+    }
+
+    private Evaluator consumeEvaluator() {
+<span id="H2">        if (tq.matchChomp(&quot;#&quot;))</span>
+<span id="H2">            return byId();</span>
+<span id="H2">        else if (tq.matchChomp(&quot;.&quot;))</span>
+<span id="H2">            return byClass();</span>
+<span id="H2">        else if (tq.matchesWord() || tq.matches(&quot;*|&quot;))</span>
+<span id="H2">            return byTag();</span>
+<span id="H2">        else if (tq.matches(&quot;[&quot;))</span>
+<span id="H2">            return byAttribute();</span>
+<span id="H2">        else if (tq.matchChomp(&quot;*&quot;))</span>
+<span id="H2">            return new Evaluator.AllElements();</span>
+<span id="H2">        else if (tq.matchChomp(&quot;:&quot;))</span>
+<span id="H2">            return parsePseudoSelector();</span>
+		else // unhandled
+            throw new Selector.SelectorParseException(&quot;Could not parse query &#x27;%s&#x27;: unexpected token at &#x27;%s&#x27;&quot;, query, tq.remainder());
+    }
+
+    private Evaluator parsePseudoSelector() {
+<span id="H2">        final String pseudo = tq.consumeCssIdentifier();</span>
+<span id="H2">        switch (pseudo) {</span>
+            case &quot;lt&quot;:
+<span id="H3">                return new Evaluator.IndexLessThan(consumeIndex());</span>
+            case &quot;gt&quot;:
+<span id="H2">                return new Evaluator.IndexGreaterThan(consumeIndex());</span>
+            case &quot;eq&quot;:
+<span id="H2">                return new Evaluator.IndexEquals(consumeIndex());</span>
+            case &quot;has&quot;:
+<span id="H2">                return has();</span>
+            case &quot;is&quot;:
+<span id="H3">                return is();</span>
+            case &quot;contains&quot;:
+<span id="H2">                return contains(false);</span>
+            case &quot;containsOwn&quot;:
+<span id="H2">                return contains(true);</span>
+            case &quot;containsWholeText&quot;:
+<span id="H2">                return containsWholeText(false);</span>
+            case &quot;containsWholeOwnText&quot;:
+<span id="H2">                return containsWholeText(true);</span>
+            case &quot;containsData&quot;:
+                return containsData();
+            case &quot;matches&quot;:
+<span id="H2">                return matches(false);</span>
+            case &quot;matchesOwn&quot;:
+<span id="H2">                return matches(true);</span>
+            case &quot;matchesWholeText&quot;:
+<span id="H2">                return matchesWholeText(false);</span>
+            case &quot;matchesWholeOwnText&quot;:
+<span id="H2">                return matchesWholeText(true);</span>
+            case &quot;not&quot;:
+<span id="H2">                return not();</span>
+            case &quot;nth-child&quot;:
+<span id="H2">                return cssNthChild(false, false);</span>
+            case &quot;nth-last-child&quot;:
+<span id="H2">                return cssNthChild(true, false);</span>
+            case &quot;nth-of-type&quot;:
+<span id="H2">                return cssNthChild(false, true);</span>
+            case &quot;nth-last-of-type&quot;:
+<span id="H2">                return cssNthChild(true, true);</span>
+            case &quot;first-child&quot;:
+<span id="H2">                return new Evaluator.IsFirstChild();</span>
+            case &quot;last-child&quot;:
+<span id="H2">                return new Evaluator.IsLastChild();</span>
+            case &quot;first-of-type&quot;:
+<span id="H2">                return new Evaluator.IsFirstOfType();</span>
+            case &quot;last-of-type&quot;:
+<span id="H2">                return new Evaluator.IsLastOfType();</span>
+            case &quot;only-child&quot;:
+<span id="H2">                return new Evaluator.IsOnlyChild();</span>
+            case &quot;only-of-type&quot;:
+<span id="H2">                return new Evaluator.IsOnlyOfType();</span>
+            case &quot;empty&quot;:
+<span id="H2">                return new Evaluator.IsEmpty();</span>
+            case &quot;root&quot;:
+<span id="H2">                return new Evaluator.IsRoot();</span>
+            case &quot;matchText&quot;:
+<span id="H2">                return new Evaluator.MatchText();</span>
+            default:
+                throw new Selector.SelectorParseException(&quot;Could not parse query &#x27;%s&#x27;: unexpected token at &#x27;%s&#x27;&quot;, query, tq.remainder());
+        }
+    }
+
+    private Evaluator byId() {
+<span id="H2">        String id = tq.consumeCssIdentifier();</span>
+<span id="H2">        Validate.notEmpty(id);</span>
+<span id="H2">        return new Evaluator.Id(id);</span>
+    }
+
+    private Evaluator byClass() {
+<span id="H2">        String className = tq.consumeCssIdentifier();</span>
+<span id="H2">        Validate.notEmpty(className);</span>
+<span id="H2">        return new Evaluator.Class(className.trim());</span>
+    }
+
+    private Evaluator byTag() {
+        // todo - these aren&#x27;t dealing perfectly with case sensitivity. For case sensitive parsers, we should also make
+        // the tag in the selector case-sensitive (and also attribute names). But for now, normalize (lower-case) for
+        // consistency - both the selector and the element tag
+<span id="H2">        String tagName = normalize(tq.consumeElementSelector());</span>
+<span id="H2">        Validate.notEmpty(tagName);</span>
+        final Evaluator eval;
+
+        // namespaces: wildcard match equals(tagName) or ending in &quot;:&quot;+tagName
+<span id="H2">        if (tagName.startsWith(&quot;*|&quot;)) {</span>
+<span id="H2">            String plainTag = tagName.substring(2); // strip *|</span>
+<span id="H2">            eval = new CombiningEvaluator.Or(</span>
+                new Evaluator.Tag(plainTag),
+<span id="H2">                new Evaluator.TagEndsWith(tagName.replace(&quot;*|&quot;, &quot;:&quot;))</span>
+            );
+<span id="H2">        } else {</span>
+            // namespaces: if element name is &quot;abc:def&quot;, selector must be &quot;abc|def&quot;, so flip:
+<span id="H2">            if (tagName.contains(&quot;|&quot;))</span>
+<span id="H2">                tagName = tagName.replace(&quot;|&quot;, &quot;:&quot;);</span>
+
+<span id="H2">            eval = new Evaluator.Tag(tagName);</span>
+        }
+<span id="H2">        return eval;</span>
+    }
+
+    private Evaluator byAttribute() {
+<span id="H2">        TokenQueue cq = new TokenQueue(tq.chompBalanced(&#x27;[&#x27;, &#x27;]&#x27;)); // content queue</span>
+<span id="H2">        String key = cq.consumeToAny(AttributeEvals); // eq, not, start, end, contain, match, (no val)</span>
+<span id="H2">        Validate.notEmpty(key);</span>
+<span id="H2">        cq.consumeWhitespace();</span>
+        final Evaluator eval;
+
+<span id="H2">        if (cq.isEmpty()) {</span>
+<span id="H2">            if (key.startsWith(&quot;^&quot;))</span>
+                eval = new Evaluator.AttributeStarting(key.substring(1));
+            else
+<span id="H2">                eval = new Evaluator.Attribute(key);</span>
+        } else {
+<span id="H2">            if (cq.matchChomp(&quot;=&quot;))</span>
+<span id="H2">                eval = new Evaluator.AttributeWithValue(key, cq.remainder());</span>
+<span id="H2">            else if (cq.matchChomp(&quot;!=&quot;))</span>
+                eval = new Evaluator.AttributeWithValueNot(key, cq.remainder());
+<span id="H2">            else if (cq.matchChomp(&quot;^=&quot;))</span>
+<span id="H2">                eval = new Evaluator.AttributeWithValueStarting(key, cq.remainder());</span>
+<span id="H2">            else if (cq.matchChomp(&quot;$=&quot;))</span>
+<span id="H2">                eval = new Evaluator.AttributeWithValueEnding(key, cq.remainder());</span>
+<span id="H2">            else if (cq.matchChomp(&quot;*=&quot;))</span>
+<span id="H2">                eval = new Evaluator.AttributeWithValueContaining(key, cq.remainder());</span>
+<span id="H2">            else if (cq.matchChomp(&quot;~=&quot;))</span>
+<span id="H2">                eval = new Evaluator.AttributeWithValueMatching(key, Pattern.compile(cq.remainder()));</span>
+            else
+                throw new Selector.SelectorParseException(&quot;Could not parse attribute query &#x27;%s&#x27;: unexpected token at &#x27;%s&#x27;&quot;, query, cq.remainder());
+        }
+<span id="H2">        return eval;</span>
+    }
+
+    //pseudo selectors :first-child, :last-child, :nth-child, ...
+<span id="H1">    private static final Pattern NTH_AB = Pattern.compile(&quot;(([+-])?(\\d+)?)n(\\s*([+-])?\\s*\\d+)?&quot;, Pattern.CASE_INSENSITIVE);</span>
+<span id="H1">    private static final Pattern NTH_B  = Pattern.compile(&quot;([+-])?(\\d+)&quot;);</span>
+
+	private Evaluator cssNthChild(boolean backwards, boolean ofType) {
+<span id="H2">		String arg = normalize(consumeParens());</span>
+<span id="H2">		Matcher mAB = NTH_AB.matcher(arg);</span>
+<span id="H2">		Matcher mB = NTH_B.matcher(arg);</span>
+		final int a, b;
+<span id="H2">		if (&quot;odd&quot;.equals(arg)) {</span>
+<span id="H3">			a = 2;</span>
+<span id="H3">			b = 1;</span>
+<span id="H2">		} else if (&quot;even&quot;.equals(arg)) {</span>
+<span id="H3">			a = 2;</span>
+<span id="H3">			b = 0;</span>
+<span id="H2">		} else if (mAB.matches()) {</span>
+<span id="H3">			a = mAB.group(3) != null ? Integer.parseInt(mAB.group(1).replaceFirst(&quot;^\\+&quot;, &quot;&quot;)) : 1;</span>
+<span id="H3">			b = mAB.group(4) != null ? Integer.parseInt(mAB.group(4).replaceFirst(&quot;^\\+&quot;, &quot;&quot;)) : 0;</span>
+<span id="H2">		} else if (mB.matches()) {</span>
+<span id="H2">			a = 0;</span>
+<span id="H2">			b = Integer.parseInt(mB.group().replaceFirst(&quot;^\\+&quot;, &quot;&quot;));</span>
+		} else {
+			throw new Selector.SelectorParseException(&quot;Could not parse nth-index &#x27;%s&#x27;: unexpected format&quot;, arg);
+		}
+
+        final Evaluator eval;
+<span id="H2">		if (ofType)</span>
+<span id="H2">			if (backwards)</span>
+<span id="H2">				eval = new Evaluator.IsNthLastOfType(a, b);</span>
+			else
+<span id="H2">				eval = new Evaluator.IsNthOfType(a, b);</span>
+		else {
+<span id="H2">			if (backwards)</span>
+<span id="H2">				eval = (new Evaluator.IsNthLastChild(a, b));</span>
+			else
+<span id="H2">				eval = new Evaluator.IsNthChild(a, b);</span>
+		}
+<span id="H2">        return eval;</span>
+	}
+
+    private String consumeParens() {
+<span id="H2">        return tq.chompBalanced(&#x27;(&#x27;, &#x27;)&#x27;);</span>
+    }
+
+    private int consumeIndex() {
+<span id="H2">        String index = consumeParens().trim();</span>
+<span id="H2">        Validate.isTrue(StringUtil.isNumeric(index), &quot;Index must be numeric&quot;);</span>
+<span id="H2">        return Integer.parseInt(index);</span>
+    }
+
+    // pseudo selector :has(el)
+    private Evaluator has() {
+<span id="H2">        String subQuery = consumeParens();</span>
+<span id="H2">        Validate.notEmpty(subQuery, &quot;:has(selector) sub-select must not be empty&quot;);</span>
+<span id="H2">        return new StructuralEvaluator.Has(parse(subQuery));</span>
+    }
+
+    // psuedo selector :is()
+    private Evaluator is() {
+<span id="H3">        String subQuery = consumeParens();</span>
+<span id="H3">        Validate.notEmpty(subQuery, &quot;:is(selector) sub-select must not be empty&quot;);</span>
+<span id="H3">        return new StructuralEvaluator.Is(parse(subQuery));</span>
+    }
+
+    // pseudo selector :contains(text), containsOwn(text)
+    private Evaluator contains(boolean own) {
+<span id="H2">        String query = own ? &quot;:containsOwn&quot; : &quot;:contains&quot;;</span>
+<span id="H2">        String searchText = TokenQueue.unescape(consumeParens());</span>
+<span id="H2">        Validate.notEmpty(searchText, query + &quot;(text) query must not be empty&quot;);</span>
+<span id="H2">        return own</span>
+<span id="H2">            ? new Evaluator.ContainsOwnText(searchText)</span>
+<span id="H2">            : new Evaluator.ContainsText(searchText);</span>
+    }
+
+    private Evaluator containsWholeText(boolean own) {
+<span id="H2">        String query = own ? &quot;:containsWholeOwnText&quot; : &quot;:containsWholeText&quot;;</span>
+<span id="H2">        String searchText = TokenQueue.unescape(consumeParens());</span>
+<span id="H2">        Validate.notEmpty(searchText, query + &quot;(text) query must not be empty&quot;);</span>
+<span id="H2">        return own</span>
+<span id="H2">            ? new Evaluator.ContainsWholeOwnText(searchText)</span>
+<span id="H2">            : new Evaluator.ContainsWholeText(searchText);</span>
+    }
+
+    // pseudo selector :containsData(data)
+    private Evaluator containsData() {
+        String searchText = TokenQueue.unescape(consumeParens());
+        Validate.notEmpty(searchText, &quot;:containsData(text) query must not be empty&quot;);
+        return new Evaluator.ContainsData(searchText);
+    }
+
+    // :matches(regex), matchesOwn(regex)
+    private Evaluator matches(boolean own) {
+<span id="H2">        String query = own ? &quot;:matchesOwn&quot; : &quot;:matches&quot;;</span>
+<span id="H2">        String regex = consumeParens(); // don&#x27;t unescape, as regex bits will be escaped</span>
+<span id="H2">        Validate.notEmpty(regex, query + &quot;(regex) query must not be empty&quot;);</span>
+
+<span id="H2">        return own</span>
+<span id="H2">            ? new Evaluator.MatchesOwn(Pattern.compile(regex))</span>
+<span id="H2">            : new Evaluator.Matches(Pattern.compile(regex));</span>
+    }
+
+    // :matches(regex), matchesOwn(regex)
+    private Evaluator matchesWholeText(boolean own) {
+<span id="H2">        String query = own ? &quot;:matchesWholeOwnText&quot; : &quot;:matchesWholeText&quot;;</span>
+<span id="H2">        String regex = consumeParens(); // don&#x27;t unescape, as regex bits will be escaped</span>
+<span id="H2">        Validate.notEmpty(regex, query + &quot;(regex) query must not be empty&quot;);</span>
+
+<span id="H2">        return own</span>
+<span id="H2">            ? new Evaluator.MatchesWholeOwnText(Pattern.compile(regex))</span>
+<span id="H2">            : new Evaluator.MatchesWholeText(Pattern.compile(regex));</span>
+    }
+
+    // :not(selector)
+    private Evaluator not() {
+<span id="H2">        String subQuery = consumeParens();</span>
+<span id="H2">        Validate.notEmpty(subQuery, &quot;:not(selector) subselect must not be empty&quot;);</span>
+
+<span id="H2">        return new StructuralEvaluator.Not(parse(subQuery));</span>
+    }
+
+    @Override
+    public String toString() {
+        return query;
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

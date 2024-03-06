@@ -1,0 +1,141 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/nodes/NodeIterator.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">nodes</a>/NodeIterator.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.nodes;
+
+import org.jsoup.helper.Validate;
+import org.jspecify.annotations.Nullable;
+
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+
+/**
+ Iterate through a Node and its tree of descendants, in document order, and returns nodes of the specified type. This
+ iterator supports structural changes to the tree during the traversal, such as {@link Node#remove()},
+ {@link Node#replaceWith(Node)}, {@link Node#wrap(String)}, etc.
+ &lt;p&gt;See also the {@link org.jsoup.select.NodeTraversor NodeTraversor} if {@code head} and {@code tail} callbacks are
+ desired for each node.&lt;/p&gt;
+ @since 1.17.1
+ */
+public class NodeIterator&lt;T extends Node&gt; implements Iterator&lt;T&gt; {
+    private Node root;                      // root / starting node
+    private @Nullable T next;               // the next node to return
+    private Node current;                   // the current (last emitted) node
+    private Node previous;                  // the previously emitted node; used to recover from structural changes
+    private @Nullable Node currentParent;   // the current node&#x27;s parent; used to detect structural changes
+    private final Class&lt;T&gt; type;            // the desired node class type
+
+    /**
+     Create a NoteIterator that will iterate the supplied node, and all of its descendants. The returned {@link #next}
+     type will be filtered to the input type.
+     * @param start initial node
+     * @param type node type to filter for
+     */
+<span id="H1">    public NodeIterator(Node start, Class&lt;T&gt; type) {</span>
+<span id="H1">        Validate.notNull(start);</span>
+<span id="H1">        Validate.notNull(type);</span>
+<span id="H1">        this.type = type;</span>
+
+<span id="H1">        restart(start);</span>
+<span id="H1">    }</span>
+
+    /**
+     Create a NoteIterator that will iterate the supplied node, and all of its descendants. All node types will be
+     returned.
+     * @param start initial node
+     */
+    public static NodeIterator&lt;Node&gt; from(Node start) {
+<span id="H2">        return new NodeIterator&lt;&gt;(start, Node.class);</span>
+    }
+
+    /**
+     Restart this Iterator from the specified start node. Will act as if it were newly constructed. Useful for e.g. to
+     save some GC if the iterator is used in a tight loop.
+     * @param start the new start node.
+     */
+    public void restart(Node start) {
+<span id="H1">        if (type.isInstance(start))</span>
+            //noinspection unchecked
+<span id="H1">            next = (T) start; // first next() will be the start node</span>
+
+<span id="H1">        root = previous = current = start;</span>
+<span id="H1">        currentParent = current.parent();</span>
+<span id="H1">    }</span>
+
+    @Override public boolean hasNext() {
+<span id="H1">        maybeFindNext();</span>
+<span id="H1">        return next != null;</span>
+    }
+
+    @Override public T next() {
+<span id="H1">        maybeFindNext();</span>
+<span id="H1">        if (next == null) throw new NoSuchElementException();</span>
+
+<span id="H1">        T result = next;</span>
+<span id="H1">        previous = current;</span>
+<span id="H1">        current = next;</span>
+<span id="H1">        currentParent = current.parent();</span>
+<span id="H1">        next = null;</span>
+<span id="H1">        return result;</span>
+    }
+
+    /**
+     If next is not null, looks for and sets next. If next is null after this, we have reached the end.
+     */
+    private void maybeFindNext() {
+<span id="H1">        if (next != null) return;</span>
+
+        //  change detected (removed or replaced), redo from previous
+<span id="H1">        if (currentParent != null &amp;&amp; !current.hasParent())</span>
+<span id="H2">            current = previous;</span>
+
+<span id="H1">        next = findNextNode();</span>
+<span id="H1">    }</span>
+
+    private @Nullable T findNextNode() {
+<span id="H1">        Node node = current;</span>
+        while (true) {
+<span id="H1">            if (node.childNodeSize() &gt; 0)</span>
+<span id="H1">                node = node.childNode(0);                   // descend children</span>
+<span id="H1">            else if (root.equals(node))</span>
+<span id="H2">                node = null;                                // complete when all children of root are fully visited</span>
+<span id="H1">            else if (node.nextSibling() != null)</span>
+<span id="H1">                node = node.nextSibling();                  // in a descendant with no more children; traverse</span>
+            else {
+                while (true) {
+<span id="H1">                    node = node.parent();                   // pop out of descendants</span>
+<span id="H1">                    if (node == null || root.equals(node))</span>
+<span id="H1">                        return null;                        // got back to root; complete</span>
+<span id="H1">                    if (node.nextSibling() != null) {</span>
+<span id="H2">                        node = node.nextSibling();          // traverse</span>
+<span id="H2">                        break;</span>
+                    }
+                }
+            }
+<span id="H1">            if (node == null)</span>
+<span id="H2">                return null;                                // reached the end</span>
+
+<span id="H1">            if (type.isInstance(node))</span>
+                //noinspection unchecked
+<span id="H1">                return (T) node;</span>
+        }
+    }
+
+    @Override public void remove() {
+<span id="H3">        current.remove();</span>
+<span id="H3">    }</span>
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

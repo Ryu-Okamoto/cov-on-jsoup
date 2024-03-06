@@ -1,0 +1,99 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/helper/ChangeNotifyingArrayList.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">helper</a>/ChangeNotifyingArrayList.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.helper;
+
+import java.util.ArrayList;
+import java.util.Collection;
+
+/**
+ * Implementation of ArrayList that watches out for changes to the contents.
+ */
+public abstract class ChangeNotifyingArrayList&lt;E&gt; extends ArrayList&lt;E&gt; {
+    public ChangeNotifyingArrayList(int initialCapacity) {
+<span id="H0">        super(initialCapacity);</span>
+<span id="H0">    }</span>
+
+    public abstract void onContentsChanged();
+
+    @Override
+    public E set(int index, E element) {
+<span id="H2">        onContentsChanged();</span>
+<span id="H2">        return super.set(index, element);</span>
+    }
+
+    @Override
+    public boolean add(E e) {
+<span id="H0">        onContentsChanged();</span>
+<span id="H0">        return super.add(e);</span>
+    }
+
+    @Override
+    public void add(int index, E element) {
+        onContentsChanged();
+        super.add(index, element);
+    }
+
+    @Override
+    public E remove(int index) {
+<span id="H2">        onContentsChanged();</span>
+<span id="H2">        return super.remove(index);</span>
+    }
+
+    @Override
+    public boolean remove(Object o) {
+        onContentsChanged();
+        return super.remove(o);
+    }
+
+    @Override
+    public void clear() {
+<span id="H2">        onContentsChanged();</span>
+<span id="H2">        super.clear();</span>
+<span id="H2">    }</span>
+
+    @Override
+    public boolean addAll(Collection&lt;? extends E&gt; c) {
+<span id="H2">        onContentsChanged();</span>
+<span id="H2">        return super.addAll(c);</span>
+    }
+
+    @Override
+    public boolean addAll(int index, Collection&lt;? extends E&gt; c) {
+<span id="H1">        onContentsChanged();</span>
+<span id="H1">        return super.addAll(index, c);</span>
+    }
+
+    @Override
+    protected void removeRange(int fromIndex, int toIndex) {
+        onContentsChanged();
+        super.removeRange(fromIndex, toIndex);
+    }
+
+    @Override
+    public boolean removeAll(Collection&lt;?&gt; c) {
+        onContentsChanged();
+        return super.removeAll(c);
+    }
+
+    @Override
+    public boolean retainAll(Collection&lt;?&gt; c) {
+        onContentsChanged();
+        return super.retainAll(c);
+    }
+
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

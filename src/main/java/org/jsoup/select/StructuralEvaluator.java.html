@@ -1,0 +1,304 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/select/StructuralEvaluator.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">select</a>/StructuralEvaluator.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.select;
+
+import org.jsoup.internal.StringUtil;
+import org.jsoup.nodes.Element;
+import org.jsoup.nodes.NodeIterator;
+
+import java.util.ArrayList;
+import java.util.IdentityHashMap;
+
+/**
+ * Base structural evaluator.
+ */
+abstract class StructuralEvaluator extends Evaluator {
+    final Evaluator evaluator;
+
+<span id="H2">    public StructuralEvaluator(Evaluator evaluator) {</span>
+<span id="H2">        this.evaluator = evaluator;</span>
+<span id="H2">    }</span>
+
+    // Memoize inner matches, to save repeated re-evaluations of parent, sibling etc.
+    // root + element: Boolean matches. ThreadLocal in case the Evaluator is compiled then reused across multi threads
+<span id="H2">    final ThreadLocal&lt;IdentityHashMap&lt;Element, IdentityHashMap&lt;Element, Boolean&gt;&gt;&gt;</span>
+<span id="H2">        threadMemo = ThreadLocal.withInitial(IdentityHashMap::new);</span>
+
+    boolean memoMatches(final Element root, final Element element) {
+        // not using computeIfAbsent, as the lambda impl requires a new Supplier closure object on every hit: tons of GC
+<span id="H2">        IdentityHashMap&lt;Element, IdentityHashMap&lt;Element, Boolean&gt;&gt; rootMemo = threadMemo.get();</span>
+<span id="H2">        IdentityHashMap&lt;Element, Boolean&gt; memo = rootMemo.get(root);</span>
+<span id="H2">        if (memo == null) {</span>
+<span id="H2">            memo = new IdentityHashMap&lt;&gt;();</span>
+<span id="H2">            rootMemo.put(root, memo);</span>
+        }
+<span id="H2">        Boolean matches = memo.get(element);</span>
+<span id="H2">        if (matches == null) {</span>
+<span id="H2">            matches = evaluator.matches(root, element);</span>
+<span id="H2">            memo.put(element, matches);</span>
+        }
+<span id="H2">        return matches;</span>
+    }
+
+    @Override protected void reset() {
+<span id="H2">        threadMemo.get().clear();</span>
+<span id="H2">        super.reset();</span>
+<span id="H2">    }</span>
+
+<span id="H2">    static class Root extends Evaluator {</span>
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            return root == element;</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 1;</span>
+        }
+
+        @Override public String toString() {
+            return &quot;&quot;;
+        }
+    }
+
+    static class Has extends StructuralEvaluator {
+<span id="H2">        final NodeIterator&lt;Element&gt; it = new NodeIterator&lt;&gt;(new Element(&quot;html&quot;), Element.class);</span>
+        // the element here is just a placeholder so this can be final - gets set in restart()
+
+        public Has(Evaluator evaluator) {
+<span id="H2">            super(evaluator);</span>
+<span id="H2">        }</span>
+
+        @Override public boolean matches(Element root, Element element) {
+            // for :has, we only want to match children (or below), not the input element. And we want to minimize GCs
+<span id="H2">            it.restart(element);</span>
+<span id="H2">            while (it.hasNext()) {</span>
+<span id="H2">                Element el = it.next();</span>
+<span id="H2">                if (el == element) continue; // don&#x27;t match self, only descendants</span>
+<span id="H2">                if (evaluator.matches(element, el))</span>
+<span id="H2">                    return true;</span>
+<span id="H2">            }</span>
+<span id="H2">            return false;</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 10 * evaluator.cost();</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H3">            return String.format(&quot;:has(%s)&quot;, evaluator);</span>
+        }
+    }
+
+    /** Implements the :is(sub-query) pseudo-selector */
+    static class Is extends StructuralEvaluator {
+        public Is(Evaluator evaluator) {
+<span id="H3">            super(evaluator);</span>
+<span id="H3">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H3">            return evaluator.matches(root, element);</span>
+        }
+
+        @Override protected int cost() {
+<span id="H3">            return 2 + evaluator.cost();</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H3">            return String.format(&quot;:is(%s)&quot;, evaluator);</span>
+        }
+    }
+
+    static class Not extends StructuralEvaluator {
+        public Not(Evaluator evaluator) {
+<span id="H2">            super(evaluator);</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            return !memoMatches(root, element);</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 2 + evaluator.cost();</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H3">            return String.format(&quot;:not(%s)&quot;, evaluator);</span>
+        }
+    }
+
+    static class Parent extends StructuralEvaluator {
+        public Parent(Evaluator evaluator) {
+<span id="H2">            super(evaluator);</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            if (root == element)</span>
+<span id="H2">                return false;</span>
+
+<span id="H2">            Element parent = element.parent();</span>
+<span id="H2">            while (parent != null) {</span>
+<span id="H2">                if (memoMatches(root, parent))</span>
+<span id="H2">                    return true;</span>
+<span id="H2">                if (parent == root)</span>
+<span id="H2">                    break;</span>
+<span id="H2">                parent = parent.parent();</span>
+            }
+<span id="H2">            return false;</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 2 * evaluator.cost();</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H2">            return String.format(&quot;%s &quot;, evaluator);</span>
+        }
+    }
+
+    /**
+     @deprecated replaced by {@link  ImmediateParentRun}
+     */
+    @Deprecated
+    static class ImmediateParent extends StructuralEvaluator {
+        public ImmediateParent(Evaluator evaluator) {
+            super(evaluator);
+        }
+
+        @Override
+        public boolean matches(Element root, Element element) {
+            if (root == element)
+                return false;
+
+            Element parent = element.parent();
+            return parent != null &amp;&amp; memoMatches(root, parent);
+        }
+
+        @Override protected int cost() {
+            return 1 + evaluator.cost();
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;%s &gt; &quot;, evaluator);
+        }
+    }
+
+    /**
+     Holds a list of evaluators for one &gt; two &gt; three immediate parent matches, and the final direct evaluator under
+     test. To match, these are effectively ANDed together, starting from the last, matching up to the first.
+     */
+    static class ImmediateParentRun extends Evaluator {
+<span id="H2">        final ArrayList&lt;Evaluator&gt; evaluators = new ArrayList&lt;&gt;();</span>
+<span id="H2">        int cost = 2;</span>
+
+<span id="H2">        public ImmediateParentRun(Evaluator evaluator) {</span>
+<span id="H2">            evaluators.add(evaluator);</span>
+<span id="H2">            cost += evaluator.cost();</span>
+<span id="H2">        }</span>
+
+        void add(Evaluator evaluator) {
+<span id="H2">            evaluators.add(evaluator);</span>
+<span id="H2">            cost += evaluator.cost();</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            if (element == root)</span>
+<span id="H2">                return false; // cannot match as the second eval (first parent test) would be above the root</span>
+
+<span id="H2">            for (int i = evaluators.size() -1; i &gt;= 0; --i) {</span>
+<span id="H2">                if (element == null)</span>
+                    return false;
+<span id="H2">                Evaluator eval = evaluators.get(i);</span>
+<span id="H2">                if (!eval.matches(root, element))</span>
+<span id="H2">                    return false;</span>
+<span id="H2">                element = element.parent();</span>
+            }
+<span id="H2">            return true;</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return cost;</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H2">            return StringUtil.join(evaluators, &quot; &gt; &quot;);</span>
+        }
+    }
+
+    static class PreviousSibling extends StructuralEvaluator {
+        public PreviousSibling(Evaluator evaluator) {
+<span id="H2">            super(evaluator);</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            if (root == element) return false;</span>
+
+<span id="H2">            Element sibling = element.firstElementSibling();</span>
+<span id="H2">            while (sibling != null) {</span>
+<span id="H2">                if (sibling == element) break;</span>
+<span id="H2">                if (memoMatches(root, sibling)) return true;</span>
+<span id="H3">                sibling = sibling.nextElementSibling();</span>
+            }
+
+<span id="H2">            return false;</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 3 * evaluator.cost();</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H3">            return String.format(&quot;%s ~ &quot;, evaluator);</span>
+        }
+    }
+
+    static class ImmediatePreviousSibling extends StructuralEvaluator {
+        public ImmediatePreviousSibling(Evaluator evaluator) {
+<span id="H2">            super(evaluator);</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            if (root == element)</span>
+<span id="H2">                return false;</span>
+
+<span id="H2">            Element prev = element.previousElementSibling();</span>
+<span id="H2">            return prev != null &amp;&amp; memoMatches(root, prev);</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 2 + evaluator.cost();</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H3">            return String.format(&quot;%s + &quot;, evaluator);</span>
+        }
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

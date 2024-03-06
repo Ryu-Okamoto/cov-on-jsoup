@@ -1,0 +1,1770 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/parser/TokeniserState.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">parser</a>/TokeniserState.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.parser;
+
+import org.jsoup.nodes.DocumentType;
+
+/**
+ * States and transition activations for the Tokeniser.
+ */
+<span id="H0">enum TokeniserState {</span>
+<span id="H0">    Data {</span>
+        // in data state, gather characters until a character reference or tag is found
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            switch (r.current()) {</span>
+                case &#x27;&amp;&#x27;:
+<span id="H1">                    t.advanceTransition(CharacterReferenceInData);</span>
+<span id="H1">                    break;</span>
+                case &#x27;&lt;&#x27;:
+<span id="H1">                    t.advanceTransition(TagOpen);</span>
+<span id="H1">                    break;</span>
+                case nullChar:
+<span id="H2">                    t.error(this); // NOT replacement character (oddly?)</span>
+<span id="H2">                    t.emit(r.consume());</span>
+<span id="H2">                    break;</span>
+                case eof:
+<span id="H1">                    t.emit(new Token.EOF());</span>
+<span id="H1">                    break;</span>
+                default:
+<span id="H1">                    String data = r.consumeData();</span>
+<span id="H1">                    t.emit(data);</span>
+                    break;
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    CharacterReferenceInData {</span>
+        // from &amp; in data
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            readCharRef(t, Data);</span>
+<span id="H1">        }</span>
+    },
+<span id="H0">    Rcdata {</span>
+        /// handles data in title, textarea etc
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            switch (r.current()) {</span>
+                case &#x27;&amp;&#x27;:
+<span id="H2">                    t.advanceTransition(CharacterReferenceInRcdata);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&lt;&#x27;:
+<span id="H1">                    t.advanceTransition(RcdataLessthanSign);</span>
+<span id="H1">                    break;</span>
+                case nullChar:
+<span id="H1">                    t.error(this);</span>
+<span id="H1">                    r.advance();</span>
+<span id="H1">                    t.emit(replacementChar);</span>
+<span id="H1">                    break;</span>
+                case eof:
+<span id="H1">                    t.emit(new Token.EOF());</span>
+<span id="H1">                    break;</span>
+                default:
+<span id="H1">                    String data = r.consumeData();</span>
+<span id="H1">                    t.emit(data);</span>
+                    break;
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    CharacterReferenceInRcdata {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            readCharRef(t, Rcdata);</span>
+<span id="H2">        }</span>
+    },
+<span id="H0">    Rawtext {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            readRawData(t, r, this, RawtextLessthanSign);</span>
+<span id="H2">        }</span>
+    },
+<span id="H0">    ScriptData {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            readRawData(t, r, this, ScriptDataLessthanSign);</span>
+<span id="H1">        }</span>
+    },
+<span id="H0">    PLAINTEXT {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            switch (r.current()) {</span>
+                case nullChar:
+<span id="H2">                    t.error(this);</span>
+<span id="H2">                    r.advance();</span>
+<span id="H2">                    t.emit(replacementChar);</span>
+<span id="H2">                    break;</span>
+                case eof:
+<span id="H2">                    t.emit(new Token.EOF());</span>
+<span id="H2">                    break;</span>
+                default:
+<span id="H2">                    String data = r.consumeTo(nullChar);</span>
+<span id="H2">                    t.emit(data);</span>
+                    break;
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    TagOpen {</span>
+        // from &lt; in data
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            switch (r.current()) {</span>
+                case &#x27;!&#x27;:
+<span id="H1">                    t.advanceTransition(MarkupDeclarationOpen);</span>
+<span id="H1">                    break;</span>
+                case &#x27;/&#x27;:
+<span id="H1">                    t.advanceTransition(EndTagOpen);</span>
+<span id="H1">                    break;</span>
+                case &#x27;?&#x27;:
+<span id="H2">                    t.createBogusCommentPending();</span>
+<span id="H2">                    t.transition(BogusComment);</span>
+<span id="H2">                    break;</span>
+                default:
+<span id="H1">                    if (r.matchesAsciiAlpha()) {</span>
+<span id="H1">                        t.createTagPending(true);</span>
+<span id="H1">                        t.transition(TagName);</span>
+                    } else {
+<span id="H2">                        t.error(this);</span>
+<span id="H2">                        t.emit(&#x27;&lt;&#x27;); // char that got us here</span>
+<span id="H2">                        t.transition(Data);</span>
+                    }
+                    break;
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    EndTagOpen {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            if (r.isEmpty()) {</span>
+<span id="H2">                t.eofError(this);</span>
+<span id="H2">                t.emit(&quot;&lt;/&quot;);</span>
+<span id="H2">                t.transition(Data);</span>
+<span id="H1">            } else if (r.matchesAsciiAlpha()) {</span>
+<span id="H1">                t.createTagPending(false);</span>
+<span id="H1">                t.transition(TagName);</span>
+<span id="H2">            } else if (r.matches(&#x27;&gt;&#x27;)) {</span>
+<span id="H2">                t.error(this);</span>
+<span id="H2">                t.advanceTransition(Data);</span>
+            } else {
+<span id="H2">                t.error(this);</span>
+<span id="H2">                t.createBogusCommentPending();</span>
+<span id="H2">                t.commentPending.append(&#x27;/&#x27;); // push the / back on that got us here</span>
+<span id="H2">                t.transition(BogusComment);</span>
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    TagName {</span>
+        // from &lt; or &lt;/ in data, will have start or end tag pending
+        @Override void read(Tokeniser t, CharacterReader r) {
+            // previous TagOpen state did NOT consume, will have a letter char in current
+<span id="H1">            String tagName = r.consumeTagName();</span>
+<span id="H1">            t.tagPending.appendTagName(tagName);</span>
+
+<span id="H1">            char c = r.consume();</span>
+<span id="H1">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H1">                    t.transition(BeforeAttributeName);</span>
+<span id="H1">                    break;</span>
+                case &#x27;/&#x27;:
+<span id="H2">                    t.transition(SelfClosingStartTag);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&lt;&#x27;: // NOTE: out of spec, but clear author intent
+<span id="H2">                    r.unconsume();</span>
+<span id="H2">                    t.error(this);</span>
+                    // intended fall through to next &gt;
+                case &#x27;&gt;&#x27;:
+<span id="H1">                    t.emitTagPending();</span>
+<span id="H1">                    t.transition(Data);</span>
+<span id="H1">                    break;</span>
+                case nullChar: // replacement
+                    t.tagPending.appendTagName(replacementStr);
+                    break;
+                case eof: // should emit pending tag?
+<span id="H1">                    t.eofError(this);</span>
+<span id="H1">                    t.transition(Data);</span>
+<span id="H1">                    break;</span>
+                default: // buffer underrun
+<span id="H2">                    t.tagPending.appendTagName(c);</span>
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    RcdataLessthanSign {</span>
+        // from &lt; in rcdata
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            if (r.matches(&#x27;/&#x27;)) {</span>
+<span id="H1">                t.createTempBuffer();</span>
+<span id="H1">                t.advanceTransition(RCDATAEndTagOpen);</span>
+<span id="H1">            } else if (r.readFully() &amp;&amp; r.matchesAsciiAlpha() &amp;&amp; t.appropriateEndTagName() != null &amp;&amp;  !r.containsIgnoreCase(t.appropriateEndTagSeq())) {</span>
+                // diverge from spec: got a start tag, but there&#x27;s no appropriate end tag (&lt;/title&gt;), so rather than
+                // consuming to EOF; break out here
+<span id="H2">                t.tagPending = t.createTagPending(false).name(t.appropriateEndTagName());</span>
+<span id="H2">                t.emitTagPending();</span>
+<span id="H2">                t.transition(TagOpen); // straight into TagOpen, as we came from &lt; and looks like we&#x27;re on a start tag</span>
+            } else {
+<span id="H1">                t.emit(&quot;&lt;&quot;);</span>
+<span id="H1">                t.transition(Rcdata);</span>
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    RCDATAEndTagOpen {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            if (r.matchesAsciiAlpha()) {</span>
+<span id="H1">                t.createTagPending(false);</span>
+<span id="H1">                t.tagPending.appendTagName(r.current());</span>
+<span id="H1">                t.dataBuffer.append(r.current());</span>
+<span id="H1">                t.advanceTransition(RCDATAEndTagName);</span>
+            } else {
+<span id="H1">                t.emit(&quot;&lt;/&quot;);</span>
+<span id="H1">                t.transition(Rcdata);</span>
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    RCDATAEndTagName {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            if (r.matchesAsciiAlpha()) {</span>
+<span id="H1">                String name = r.consumeLetterSequence();</span>
+<span id="H1">                t.tagPending.appendTagName(name);</span>
+<span id="H1">                t.dataBuffer.append(name);</span>
+<span id="H1">                return;</span>
+            }
+
+<span id="H1">            char c = r.consume();</span>
+<span id="H1">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H1">                    if (t.isAppropriateEndTagToken())</span>
+<span id="H1">                        t.transition(BeforeAttributeName);</span>
+                    else
+                        anythingElse(t, r);
+                    break;
+                case &#x27;/&#x27;:
+                    if (t.isAppropriateEndTagToken())
+                        t.transition(SelfClosingStartTag);
+                    else
+                        anythingElse(t, r);
+                    break;
+                case &#x27;&gt;&#x27;:
+<span id="H1">                    if (t.isAppropriateEndTagToken()) {</span>
+<span id="H1">                        t.emitTagPending();</span>
+<span id="H1">                        t.transition(Data);</span>
+                    }
+                    else
+<span id="H1">                        anythingElse(t, r);</span>
+<span id="H1">                    break;</span>
+                default:
+<span id="H1">                    anythingElse(t, r);</span>
+            }
+<span id="H1">        }</span>
+
+        private void anythingElse(Tokeniser t, CharacterReader r) {
+<span id="H1">            t.emit(&quot;&lt;/&quot;);</span>
+<span id="H1">            t.emit(t.dataBuffer);</span>
+<span id="H1">            r.unconsume();</span>
+<span id="H1">            t.transition(Rcdata);</span>
+<span id="H1">        }</span>
+    },
+<span id="H0">    RawtextLessthanSign {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            if (r.matches(&#x27;/&#x27;)) {</span>
+<span id="H2">                t.createTempBuffer();</span>
+<span id="H2">                t.advanceTransition(RawtextEndTagOpen);</span>
+            } else {
+<span id="H2">                t.emit(&#x27;&lt;&#x27;);</span>
+<span id="H2">                t.transition(Rawtext);</span>
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    RawtextEndTagOpen {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            readEndTag(t, r, RawtextEndTagName, Rawtext);</span>
+<span id="H2">        }</span>
+    },
+<span id="H0">    RawtextEndTagName {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            handleDataEndTag(t, r, Rawtext);</span>
+<span id="H2">        }</span>
+    },
+<span id="H0">    ScriptDataLessthanSign {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            switch (r.consume()) {</span>
+                case &#x27;/&#x27;:
+<span id="H1">                    t.createTempBuffer();</span>
+<span id="H1">                    t.transition(ScriptDataEndTagOpen);</span>
+<span id="H1">                    break;</span>
+                case &#x27;!&#x27;:
+<span id="H2">                    t.emit(&quot;&lt;!&quot;);</span>
+<span id="H2">                    t.transition(ScriptDataEscapeStart);</span>
+<span id="H2">                    break;</span>
+                case eof:
+<span id="H2">                    t.emit(&quot;&lt;&quot;);</span>
+<span id="H2">                    t.eofError(this);</span>
+<span id="H2">                    t.transition(Data);</span>
+<span id="H2">                    break;</span>
+                default:
+<span id="H2">                    t.emit(&quot;&lt;&quot;);</span>
+<span id="H2">                    r.unconsume();</span>
+<span id="H2">                    t.transition(ScriptData);</span>
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    ScriptDataEndTagOpen {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            readEndTag(t, r, ScriptDataEndTagName, ScriptData);</span>
+<span id="H1">        }</span>
+    },
+<span id="H0">    ScriptDataEndTagName {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            handleDataEndTag(t, r, ScriptData);</span>
+<span id="H1">        }</span>
+    },
+<span id="H0">    ScriptDataEscapeStart {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            if (r.matches(&#x27;-&#x27;)) {</span>
+<span id="H2">                t.emit(&#x27;-&#x27;);</span>
+<span id="H2">                t.advanceTransition(ScriptDataEscapeStartDash);</span>
+            } else {
+<span id="H2">                t.transition(ScriptData);</span>
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    ScriptDataEscapeStartDash {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            if (r.matches(&#x27;-&#x27;)) {</span>
+<span id="H2">                t.emit(&#x27;-&#x27;);</span>
+<span id="H2">                t.advanceTransition(ScriptDataEscapedDashDash);</span>
+            } else {
+                t.transition(ScriptData);
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    ScriptDataEscaped {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            if (r.isEmpty()) {</span>
+                t.eofError(this);
+                t.transition(Data);
+                return;
+            }
+
+<span id="H2">            switch (r.current()) {</span>
+                case &#x27;-&#x27;:
+<span id="H2">                    t.emit(&#x27;-&#x27;);</span>
+<span id="H2">                    t.advanceTransition(ScriptDataEscapedDash);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&lt;&#x27;:
+<span id="H2">                    t.advanceTransition(ScriptDataEscapedLessthanSign);</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    r.advance();
+                    t.emit(replacementChar);
+                    break;
+                default:
+<span id="H2">                    String data = r.consumeToAny(&#x27;-&#x27;, &#x27;&lt;&#x27;, nullChar);</span>
+<span id="H2">                    t.emit(data);</span>
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    ScriptDataEscapedDash {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            if (r.isEmpty()) {</span>
+                t.eofError(this);
+                t.transition(Data);
+                return;
+            }
+
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;-&#x27;:
+<span id="H2">                    t.emit(c);</span>
+<span id="H2">                    t.transition(ScriptDataEscapedDashDash);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&lt;&#x27;:
+                    t.transition(ScriptDataEscapedLessthanSign);
+                    break;
+                case nullChar:
+                    t.error(this);
+                    t.emit(replacementChar);
+                    t.transition(ScriptDataEscaped);
+                    break;
+                default:
+                    t.emit(c);
+                    t.transition(ScriptDataEscaped);
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    ScriptDataEscapedDashDash {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            if (r.isEmpty()) {</span>
+                t.eofError(this);
+                t.transition(Data);
+                return;
+            }
+
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;-&#x27;:
+                    t.emit(c);
+                    break;
+                case &#x27;&lt;&#x27;:
+                    t.transition(ScriptDataEscapedLessthanSign);
+                    break;
+                case &#x27;&gt;&#x27;:
+<span id="H2">                    t.emit(c);</span>
+<span id="H2">                    t.transition(ScriptData);</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    t.emit(replacementChar);
+                    t.transition(ScriptDataEscaped);
+                    break;
+                default:
+<span id="H2">                    t.emit(c);</span>
+<span id="H2">                    t.transition(ScriptDataEscaped);</span>
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    ScriptDataEscapedLessthanSign {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            if (r.matchesAsciiAlpha()) {</span>
+<span id="H2">                t.createTempBuffer();</span>
+<span id="H2">                t.dataBuffer.append(r.current());</span>
+<span id="H2">                t.emit(&quot;&lt;&quot;);</span>
+<span id="H2">                t.emit(r.current());</span>
+<span id="H2">                t.advanceTransition(ScriptDataDoubleEscapeStart);</span>
+<span id="H2">            } else if (r.matches(&#x27;/&#x27;)) {</span>
+<span id="H2">                t.createTempBuffer();</span>
+<span id="H2">                t.advanceTransition(ScriptDataEscapedEndTagOpen);</span>
+            } else {
+                t.emit(&#x27;&lt;&#x27;);
+                t.transition(ScriptDataEscaped);
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    ScriptDataEscapedEndTagOpen {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            if (r.matchesAsciiAlpha()) {</span>
+<span id="H2">                t.createTagPending(false);</span>
+<span id="H2">                t.tagPending.appendTagName(r.current());</span>
+<span id="H2">                t.dataBuffer.append(r.current());</span>
+<span id="H2">                t.advanceTransition(ScriptDataEscapedEndTagName);</span>
+            } else {
+                t.emit(&quot;&lt;/&quot;);
+                t.transition(ScriptDataEscaped);
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    ScriptDataEscapedEndTagName {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            handleDataEndTag(t, r, ScriptDataEscaped);</span>
+<span id="H2">        }</span>
+    },
+<span id="H0">    ScriptDataDoubleEscapeStart {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            handleDataDoubleEscapeTag(t, r, ScriptDataDoubleEscaped, ScriptDataEscaped);</span>
+<span id="H2">        }</span>
+    },
+<span id="H0">    ScriptDataDoubleEscaped {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.current();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;-&#x27;:
+                    t.emit(c);
+                    t.advanceTransition(ScriptDataDoubleEscapedDash);
+                    break;
+                case &#x27;&lt;&#x27;:
+<span id="H2">                    t.emit(c);</span>
+<span id="H2">                    t.advanceTransition(ScriptDataDoubleEscapedLessthanSign);</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    r.advance();
+                    t.emit(replacementChar);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.transition(Data);
+                    break;
+                default:
+<span id="H2">                    String data = r.consumeToAny(&#x27;-&#x27;, &#x27;&lt;&#x27;, nullChar);</span>
+<span id="H2">                    t.emit(data);</span>
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    ScriptDataDoubleEscapedDash {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+            char c = r.consume();
+            switch (c) {
+                case &#x27;-&#x27;:
+                    t.emit(c);
+                    t.transition(ScriptDataDoubleEscapedDashDash);
+                    break;
+                case &#x27;&lt;&#x27;:
+                    t.emit(c);
+                    t.transition(ScriptDataDoubleEscapedLessthanSign);
+                    break;
+                case nullChar:
+                    t.error(this);
+                    t.emit(replacementChar);
+                    t.transition(ScriptDataDoubleEscaped);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.transition(Data);
+                    break;
+                default:
+                    t.emit(c);
+                    t.transition(ScriptDataDoubleEscaped);
+            }
+        }
+    },
+<span id="H0">    ScriptDataDoubleEscapedDashDash {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+            char c = r.consume();
+            switch (c) {
+                case &#x27;-&#x27;:
+                    t.emit(c);
+                    break;
+                case &#x27;&lt;&#x27;:
+                    t.emit(c);
+                    t.transition(ScriptDataDoubleEscapedLessthanSign);
+                    break;
+                case &#x27;&gt;&#x27;:
+                    t.emit(c);
+                    t.transition(ScriptData);
+                    break;
+                case nullChar:
+                    t.error(this);
+                    t.emit(replacementChar);
+                    t.transition(ScriptDataDoubleEscaped);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.transition(Data);
+                    break;
+                default:
+                    t.emit(c);
+                    t.transition(ScriptDataDoubleEscaped);
+            }
+        }
+    },
+<span id="H0">    ScriptDataDoubleEscapedLessthanSign {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            if (r.matches(&#x27;/&#x27;)) {</span>
+<span id="H2">                t.emit(&#x27;/&#x27;);</span>
+<span id="H2">                t.createTempBuffer();</span>
+<span id="H2">                t.advanceTransition(ScriptDataDoubleEscapeEnd);</span>
+            } else {
+                t.transition(ScriptDataDoubleEscaped);
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    ScriptDataDoubleEscapeEnd {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            handleDataDoubleEscapeTag(t,r, ScriptDataEscaped, ScriptDataDoubleEscaped);</span>
+<span id="H2">        }</span>
+    },
+<span id="H0">    BeforeAttributeName {</span>
+        // from tagname &lt;xxx
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            char c = r.consume();</span>
+<span id="H1">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H1">                    break; // ignore whitespace</span>
+                case &#x27;/&#x27;:
+<span id="H1">                    t.transition(SelfClosingStartTag);</span>
+<span id="H1">                    break;</span>
+                case &#x27;&lt;&#x27;: // NOTE: out of spec, but clear (spec has this as a part of the attribute name)
+<span id="H2">                    r.unconsume();</span>
+<span id="H2">                    t.error(this);</span>
+                    // intended fall through as if &gt;
+                case &#x27;&gt;&#x27;:
+<span id="H1">                    t.emitTagPending();</span>
+<span id="H1">                    t.transition(Data);</span>
+<span id="H1">                    break;</span>
+                case nullChar:
+                    r.unconsume();
+                    t.error(this);
+                    t.tagPending.newAttribute();
+                    t.transition(AttributeName);
+                    break;
+                case eof:
+<span id="H2">                    t.eofError(this);</span>
+<span id="H2">                    t.transition(Data);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&quot;&#x27;:
+                case &#x27;\&#x27;&#x27;:
+                case &#x27;=&#x27;:
+<span id="H1">                    t.error(this);</span>
+<span id="H1">                    t.tagPending.newAttribute();</span>
+<span id="H1">                    t.tagPending.appendAttributeName(c, r.pos()-1, r.pos());</span>
+<span id="H1">                    t.transition(AttributeName);</span>
+<span id="H1">                    break;</span>
+                default: // A-Z, anything else
+<span id="H1">                    t.tagPending.newAttribute();</span>
+<span id="H1">                    r.unconsume();</span>
+<span id="H1">                    t.transition(AttributeName);</span>
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    AttributeName {</span>
+        // from before attribute name
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            int pos = r.pos();</span>
+<span id="H1">            String name = r.consumeToAnySorted(attributeNameCharsSorted); // spec deviate - consume and emit nulls in one hit vs stepping</span>
+<span id="H1">            t.tagPending.appendAttributeName(name, pos, r.pos());</span>
+
+<span id="H1">            pos = r.pos();</span>
+<span id="H1">            char c = r.consume();</span>
+<span id="H1">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H1">                    t.transition(AfterAttributeName);</span>
+<span id="H1">                    break;</span>
+                case &#x27;/&#x27;:
+                    t.transition(SelfClosingStartTag);
+                    break;
+                case &#x27;=&#x27;:
+<span id="H1">                    t.transition(BeforeAttributeValue);</span>
+<span id="H1">                    break;</span>
+                case &#x27;&gt;&#x27;:
+<span id="H1">                    t.emitTagPending();</span>
+<span id="H1">                    t.transition(Data);</span>
+<span id="H1">                    break;</span>
+                case eof:
+<span id="H1">                    t.eofError(this);</span>
+<span id="H1">                    t.transition(Data);</span>
+<span id="H1">                    break;</span>
+                case &#x27;&quot;&#x27;:
+                case &#x27;\&#x27;&#x27;:
+                case &#x27;&lt;&#x27;:
+<span id="H1">                    t.error(this);</span>
+<span id="H1">                    t.tagPending.appendAttributeName(c, pos, r.pos());</span>
+<span id="H1">                    break;</span>
+                default: // buffer underrun
+<span id="H2">                    t.tagPending.appendAttributeName(c, pos, r.pos());</span>
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    AfterAttributeName {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            char c = r.consume();</span>
+<span id="H1">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+                    // ignore
+<span id="H2">                    break;</span>
+                case &#x27;/&#x27;:
+<span id="H1">                    t.transition(SelfClosingStartTag);</span>
+<span id="H1">                    break;</span>
+                case &#x27;=&#x27;:
+<span id="H2">                    t.transition(BeforeAttributeValue);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&gt;&#x27;:
+                    t.emitTagPending();
+                    t.transition(Data);
+                    break;
+                case nullChar:
+                    t.error(this);
+                    t.tagPending.appendAttributeName(replacementChar, r.pos()-1, r.pos());
+                    t.transition(AttributeName);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.transition(Data);
+                    break;
+                case &#x27;&quot;&#x27;:
+                case &#x27;\&#x27;&#x27;:
+                case &#x27;&lt;&#x27;:
+                    t.error(this);
+                    t.tagPending.newAttribute();
+                    t.tagPending.appendAttributeName(c, r.pos()-1, r.pos());
+                    t.transition(AttributeName);
+                    break;
+                default: // A-Z, anything else
+<span id="H1">                    t.tagPending.newAttribute();</span>
+<span id="H1">                    r.unconsume();</span>
+<span id="H1">                    t.transition(AttributeName);</span>
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    BeforeAttributeValue {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            char c = r.consume();</span>
+<span id="H1">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+                    // ignore
+<span id="H2">                    break;</span>
+                case &#x27;&quot;&#x27;:
+<span id="H1">                    t.transition(AttributeValue_doubleQuoted);</span>
+<span id="H1">                    break;</span>
+                case &#x27;&amp;&#x27;:
+                    r.unconsume();
+                    t.transition(AttributeValue_unquoted);
+                    break;
+                case &#x27;\&#x27;&#x27;:
+<span id="H1">                    t.transition(AttributeValue_singleQuoted);</span>
+<span id="H1">                    break;</span>
+                case nullChar:
+<span id="H2">                    t.error(this);</span>
+<span id="H2">                    t.tagPending.appendAttributeValue(replacementChar, r.pos()-1, r.pos());</span>
+<span id="H2">                    t.transition(AttributeValue_unquoted);</span>
+<span id="H2">                    break;</span>
+                case eof:
+<span id="H1">                    t.eofError(this);</span>
+<span id="H1">                    t.emitTagPending();</span>
+<span id="H1">                    t.transition(Data);</span>
+<span id="H1">                    break;</span>
+                case &#x27;&gt;&#x27;:
+                    t.error(this);
+                    t.emitTagPending();
+                    t.transition(Data);
+                    break;
+                case &#x27;&lt;&#x27;:
+                case &#x27;=&#x27;:
+                case &#x27;`&#x27;:
+                    t.error(this);
+                    t.tagPending.appendAttributeValue(c, r.pos()-1, r.pos());
+                    t.transition(AttributeValue_unquoted);
+                    break;
+                default:
+<span id="H1">                    r.unconsume();</span>
+<span id="H1">                    t.transition(AttributeValue_unquoted);</span>
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    AttributeValue_doubleQuoted {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            int pos = r.pos();</span>
+<span id="H1">            String value = r.consumeAttributeQuoted(false);</span>
+<span id="H1">            if (value.length() &gt; 0)</span>
+<span id="H1">                t.tagPending.appendAttributeValue(value, pos, r.pos());</span>
+            else
+<span id="H2">                t.tagPending.setEmptyAttributeValue();</span>
+
+<span id="H1">            pos = r.pos();</span>
+<span id="H1">            char c = r.consume();</span>
+<span id="H1">            switch (c) {</span>
+                case &#x27;&quot;&#x27;:
+<span id="H1">                    t.transition(AfterAttributeValue_quoted);</span>
+<span id="H1">                    break;</span>
+                case &#x27;&amp;&#x27;:
+<span id="H2">                    int[] ref = t.consumeCharacterReference(&#x27;&quot;&#x27;, true);</span>
+<span id="H2">                    if (ref != null)</span>
+<span id="H2">                        t.tagPending.appendAttributeValue(ref, pos, r.pos());</span>
+                    else
+<span id="H2">                        t.tagPending.appendAttributeValue(&#x27;&amp;&#x27;, pos, r.pos());</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    t.tagPending.appendAttributeValue(replacementChar, pos, r.pos());
+                    break;
+                case eof:
+<span id="H1">                    t.eofError(this);</span>
+<span id="H1">                    t.transition(Data);</span>
+<span id="H1">                    break;</span>
+                default: // hit end of buffer in first read, still in attribute
+<span id="H2">                    t.tagPending.appendAttributeValue(c, pos, r.pos());</span>
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    AttributeValue_singleQuoted {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            int pos = r.pos();</span>
+<span id="H1">            String value = r.consumeAttributeQuoted(true);</span>
+<span id="H1">            if (value.length() &gt; 0)</span>
+<span id="H1">                t.tagPending.appendAttributeValue(value, pos, r.pos());</span>
+            else
+<span id="H2">                t.tagPending.setEmptyAttributeValue();</span>
+
+<span id="H1">            pos = r.pos();</span>
+<span id="H1">            char c = r.consume();</span>
+<span id="H1">            switch (c) {</span>
+                case &#x27;\&#x27;&#x27;:
+<span id="H1">                    t.transition(AfterAttributeValue_quoted);</span>
+<span id="H1">                    break;</span>
+                case &#x27;&amp;&#x27;:
+<span id="H2">                    int[] ref = t.consumeCharacterReference(&#x27;\&#x27;&#x27;, true);</span>
+<span id="H2">                    if (ref != null)</span>
+<span id="H2">                        t.tagPending.appendAttributeValue(ref, pos, r.pos());</span>
+                    else
+<span id="H2">                        t.tagPending.appendAttributeValue(&#x27;&amp;&#x27;, pos, r.pos());</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    t.tagPending.appendAttributeValue(replacementChar, pos, r.pos());
+                    break;
+                case eof:
+<span id="H3">                    t.eofError(this);</span>
+<span id="H3">                    t.transition(Data);</span>
+<span id="H3">                    break;</span>
+                default: // hit end of buffer in first read, still in attribute
+<span id="H2">                    t.tagPending.appendAttributeValue(c, pos, r.pos());</span>
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    AttributeValue_unquoted {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            int pos = r.pos();</span>
+<span id="H1">            String value = r.consumeToAnySorted(attributeValueUnquoted);</span>
+<span id="H1">            if (value.length() &gt; 0)</span>
+<span id="H1">                t.tagPending.appendAttributeValue(value, pos, r.pos());</span>
+
+<span id="H1">            pos = r.pos();</span>
+<span id="H1">            char c = r.consume();</span>
+<span id="H1">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H1">                    t.transition(BeforeAttributeName);</span>
+<span id="H1">                    break;</span>
+                case &#x27;&amp;&#x27;:
+<span id="H2">                    int[] ref = t.consumeCharacterReference(&#x27;&gt;&#x27;, true);</span>
+<span id="H2">                    if (ref != null)</span>
+<span id="H2">                        t.tagPending.appendAttributeValue(ref, pos, r.pos());</span>
+                    else
+                        t.tagPending.appendAttributeValue(&#x27;&amp;&#x27;, pos, r.pos());
+                    break;
+                case &#x27;&gt;&#x27;:
+<span id="H1">                    t.emitTagPending();</span>
+<span id="H1">                    t.transition(Data);</span>
+<span id="H1">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    t.tagPending.appendAttributeValue(replacementChar, pos, r.pos());
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.transition(Data);
+                    break;
+                case &#x27;&quot;&#x27;:
+                case &#x27;\&#x27;&#x27;:
+                case &#x27;&lt;&#x27;:
+                case &#x27;=&#x27;:
+                case &#x27;`&#x27;:
+<span id="H1">                    t.error(this);</span>
+<span id="H1">                    t.tagPending.appendAttributeValue(c, pos, r.pos());</span>
+<span id="H1">                    break;</span>
+                default: // hit end of buffer in first read, still in attribute
+<span id="H2">                    t.tagPending.appendAttributeValue(c, pos, r.pos());</span>
+            }
+
+<span id="H1">        }</span>
+    },
+    // CharacterReferenceInAttributeValue state handled inline
+<span id="H0">    AfterAttributeValue_quoted {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            char c = r.consume();</span>
+<span id="H1">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H1">                    t.transition(BeforeAttributeName);</span>
+<span id="H1">                    break;</span>
+                case &#x27;/&#x27;:
+<span id="H2">                    t.transition(SelfClosingStartTag);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&gt;&#x27;:
+<span id="H1">                    t.emitTagPending();</span>
+<span id="H1">                    t.transition(Data);</span>
+<span id="H1">                    break;</span>
+                case eof:
+<span id="H1">                    t.eofError(this);</span>
+<span id="H1">                    t.transition(Data);</span>
+<span id="H1">                    break;</span>
+                default:
+<span id="H2">                    r.unconsume();</span>
+<span id="H2">                    t.error(this);</span>
+<span id="H2">                    t.transition(BeforeAttributeName);</span>
+            }
+
+<span id="H1">        }</span>
+    },
+<span id="H0">    SelfClosingStartTag {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            char c = r.consume();</span>
+<span id="H1">            switch (c) {</span>
+                case &#x27;&gt;&#x27;:
+<span id="H1">                    t.tagPending.selfClosing = true;</span>
+<span id="H1">                    t.emitTagPending();</span>
+<span id="H1">                    t.transition(Data);</span>
+<span id="H1">                    break;</span>
+                case eof:
+                    t.eofError(this);
+                    t.transition(Data);
+                    break;
+                default:
+<span id="H1">                    r.unconsume();</span>
+<span id="H1">                    t.error(this);</span>
+<span id="H1">                    t.transition(BeforeAttributeName);</span>
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    BogusComment {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+            // todo: handle bogus comment starting from eof. when does that trigger?
+<span id="H1">            t.commentPending.append(r.consumeTo(&#x27;&gt;&#x27;));</span>
+            // todo: replace nullChar with replaceChar
+<span id="H1">            char next = r.current();</span>
+<span id="H1">            if (next == &#x27;&gt;&#x27; || next == eof) {</span>
+<span id="H1">                r.consume();</span>
+<span id="H1">                t.emitCommentPending();</span>
+<span id="H1">                t.transition(Data);</span>
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    MarkupDeclarationOpen {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            if (r.matchConsume(&quot;--&quot;)) {</span>
+<span id="H2">                t.createCommentPending();</span>
+<span id="H2">                t.transition(CommentStart);</span>
+<span id="H1">            } else if (r.matchConsumeIgnoreCase(&quot;DOCTYPE&quot;)) {</span>
+<span id="H2">                t.transition(Doctype);</span>
+<span id="H1">            } else if (r.matchConsume(&quot;[CDATA[&quot;)) {</span>
+                // todo: should actually check current namespace, and only non-html allows cdata. until namespace
+                // is implemented properly, keep handling as cdata
+                //} else if (!t.currentNodeInHtmlNS() &amp;&amp; r.matchConsume(&quot;[CDATA[&quot;)) {
+<span id="H1">                t.createTempBuffer();</span>
+<span id="H1">                t.transition(CdataSection);</span>
+            } else {
+<span id="H1">                t.error(this);</span>
+<span id="H1">                t.createBogusCommentPending();</span>
+<span id="H1">                t.transition(BogusComment);</span>
+            }
+<span id="H1">        }</span>
+    },
+<span id="H0">    CommentStart {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;-&#x27;:
+<span id="H2">                    t.transition(CommentStartDash);</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    t.commentPending.append(replacementChar);
+                    t.transition(Comment);
+                    break;
+                case &#x27;&gt;&#x27;:
+                    t.error(this);
+                    t.emitCommentPending();
+                    t.transition(Data);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.emitCommentPending();
+                    t.transition(Data);
+                    break;
+                default:
+<span id="H2">                    r.unconsume();</span>
+<span id="H2">                    t.transition(Comment);</span>
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    CommentStartDash {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;-&#x27;:
+<span id="H2">                    t.transition(CommentEnd);</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    t.commentPending.append(replacementChar);
+                    t.transition(Comment);
+                    break;
+                case &#x27;&gt;&#x27;:
+                    t.error(this);
+                    t.emitCommentPending();
+                    t.transition(Data);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.emitCommentPending();
+                    t.transition(Data);
+                    break;
+                default:
+                    t.commentPending.append(c);
+                    t.transition(Comment);
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    Comment {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.current();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;-&#x27;:
+<span id="H2">                    t.advanceTransition(CommentEndDash);</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+<span id="H2">                    t.error(this);</span>
+<span id="H2">                    r.advance();</span>
+<span id="H2">                    t.commentPending.append(replacementChar);</span>
+<span id="H2">                    break;</span>
+                case eof:
+<span id="H2">                    t.eofError(this);</span>
+<span id="H2">                    t.emitCommentPending();</span>
+<span id="H2">                    t.transition(Data);</span>
+<span id="H2">                    break;</span>
+                default:
+<span id="H2">                    t.commentPending.append(r.consumeToAny(&#x27;-&#x27;, nullChar));</span>
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    CommentEndDash {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;-&#x27;:
+<span id="H2">                    t.transition(CommentEnd);</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    t.commentPending.append(&#x27;-&#x27;).append(replacementChar);
+                    t.transition(Comment);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.emitCommentPending();
+                    t.transition(Data);
+                    break;
+                default:
+<span id="H2">                    t.commentPending.append(&#x27;-&#x27;).append(c);</span>
+<span id="H2">                    t.transition(Comment);</span>
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    CommentEnd {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;&gt;&#x27;:
+<span id="H2">                    t.emitCommentPending();</span>
+<span id="H2">                    t.transition(Data);</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    t.commentPending.append(&quot;--&quot;).append(replacementChar);
+                    t.transition(Comment);
+                    break;
+                case &#x27;!&#x27;:
+<span id="H2">                    t.transition(CommentEndBang);</span>
+<span id="H2">                    break;</span>
+                case &#x27;-&#x27;:
+<span id="H2">                    t.commentPending.append(&#x27;-&#x27;);</span>
+<span id="H2">                    break;</span>
+                case eof:
+                    t.eofError(this);
+                    t.emitCommentPending();
+                    t.transition(Data);
+                    break;
+                default:
+<span id="H3">                    t.commentPending.append(&quot;--&quot;).append(c);</span>
+<span id="H3">                    t.transition(Comment);</span>
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    CommentEndBang {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;-&#x27;:
+<span id="H2">                    t.commentPending.append(&quot;--!&quot;);</span>
+<span id="H2">                    t.transition(CommentEndDash);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&gt;&#x27;:
+<span id="H2">                    t.emitCommentPending();</span>
+<span id="H2">                    t.transition(Data);</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    t.commentPending.append(&quot;--!&quot;).append(replacementChar);
+                    t.transition(Comment);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.emitCommentPending();
+                    t.transition(Data);
+                    break;
+                default:
+<span id="H3">                    t.commentPending.append(&quot;--!&quot;).append(c);</span>
+<span id="H3">                    t.transition(Comment);</span>
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    Doctype {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H2">                    t.transition(BeforeDoctypeName);</span>
+<span id="H2">                    break;</span>
+                case eof:
+                    t.eofError(this);
+                    // note: fall through to &gt; case
+                case &#x27;&gt;&#x27;: // catch invalid &lt;!DOCTYPE&gt;
+<span id="H2">                    t.error(this);</span>
+<span id="H2">                    t.createDoctypePending();</span>
+<span id="H2">                    t.doctypePending.forceQuirks = true;</span>
+<span id="H2">                    t.emitDoctypePending();</span>
+<span id="H2">                    t.transition(Data);</span>
+<span id="H2">                    break;</span>
+                default:
+                    t.error(this);
+                    t.transition(BeforeDoctypeName);
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    BeforeDoctypeName {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            if (r.matchesAsciiAlpha()) {</span>
+<span id="H2">                t.createDoctypePending();</span>
+<span id="H2">                t.transition(DoctypeName);</span>
+<span id="H2">                return;</span>
+            }
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+                    break; // ignore whitespace
+                case nullChar:
+<span id="H2">                    t.error(this);</span>
+<span id="H2">                    t.createDoctypePending();</span>
+<span id="H2">                    t.doctypePending.name.append(replacementChar);</span>
+<span id="H2">                    t.transition(DoctypeName);</span>
+<span id="H2">                    break;</span>
+                case eof:
+                    t.eofError(this);
+                    t.createDoctypePending();
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                default:
+                    t.createDoctypePending();
+                    t.doctypePending.name.append(c);
+                    t.transition(DoctypeName);
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    DoctypeName {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            if (r.matchesLetter()) {</span>
+<span id="H2">                String name = r.consumeLetterSequence();</span>
+<span id="H2">                t.doctypePending.name.append(name);</span>
+<span id="H2">                return;</span>
+            }
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;&gt;&#x27;:
+<span id="H2">                    t.emitDoctypePending();</span>
+<span id="H2">                    t.transition(Data);</span>
+<span id="H2">                    break;</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H2">                    t.transition(AfterDoctypeName);</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    t.doctypePending.name.append(replacementChar);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                default:
+                    t.doctypePending.name.append(c);
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    AfterDoctypeName {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            if (r.isEmpty()) {</span>
+                t.eofError(this);
+                t.doctypePending.forceQuirks = true;
+                t.emitDoctypePending();
+                t.transition(Data);
+                return;
+            }
+<span id="H2">            if (r.matchesAny(&#x27;\t&#x27;, &#x27;\n&#x27;, &#x27;\r&#x27;, &#x27;\f&#x27;, &#x27; &#x27;))</span>
+<span id="H2">                r.advance(); // ignore whitespace</span>
+<span id="H2">            else if (r.matches(&#x27;&gt;&#x27;)) {</span>
+                t.emitDoctypePending();
+                t.advanceTransition(Data);
+<span id="H2">            } else if (r.matchConsumeIgnoreCase(DocumentType.PUBLIC_KEY)) {</span>
+<span id="H2">                t.doctypePending.pubSysKey = DocumentType.PUBLIC_KEY;</span>
+<span id="H2">                t.transition(AfterDoctypePublicKeyword);</span>
+<span id="H2">            } else if (r.matchConsumeIgnoreCase(DocumentType.SYSTEM_KEY)) {</span>
+<span id="H2">                t.doctypePending.pubSysKey = DocumentType.SYSTEM_KEY;</span>
+<span id="H2">                t.transition(AfterDoctypeSystemKeyword);</span>
+            } else {
+                t.error(this);
+                t.doctypePending.forceQuirks = true;
+                t.advanceTransition(BogusDoctype);
+            }
+
+<span id="H2">        }</span>
+    },
+<span id="H0">    AfterDoctypePublicKeyword {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H2">                    t.transition(BeforeDoctypePublicIdentifier);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&quot;&#x27;:
+<span id="H2">                    t.error(this);</span>
+                    // set public id to empty string
+<span id="H2">                    t.transition(DoctypePublicIdentifier_doubleQuoted);</span>
+<span id="H2">                    break;</span>
+                case &#x27;\&#x27;&#x27;:
+<span id="H2">                    t.error(this);</span>
+                    // set public id to empty string
+<span id="H2">                    t.transition(DoctypePublicIdentifier_singleQuoted);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&gt;&#x27;:
+                    t.error(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                default:
+                    t.error(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.transition(BogusDoctype);
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    BeforeDoctypePublicIdentifier {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H2">                    break;</span>
+                case &#x27;&quot;&#x27;:
+                    // set public id to empty string
+<span id="H2">                    t.transition(DoctypePublicIdentifier_doubleQuoted);</span>
+<span id="H2">                    break;</span>
+                case &#x27;\&#x27;&#x27;:
+                    // set public id to empty string
+<span id="H2">                    t.transition(DoctypePublicIdentifier_singleQuoted);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&gt;&#x27;:
+                    t.error(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                default:
+                    t.error(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.transition(BogusDoctype);
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    DoctypePublicIdentifier_doubleQuoted {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;&quot;&#x27;:
+<span id="H2">                    t.transition(AfterDoctypePublicIdentifier);</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    t.doctypePending.publicIdentifier.append(replacementChar);
+                    break;
+                case &#x27;&gt;&#x27;:
+                    t.error(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                default:
+<span id="H2">                    t.doctypePending.publicIdentifier.append(c);</span>
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    DoctypePublicIdentifier_singleQuoted {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;\&#x27;&#x27;:
+<span id="H2">                    t.transition(AfterDoctypePublicIdentifier);</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    t.doctypePending.publicIdentifier.append(replacementChar);
+                    break;
+                case &#x27;&gt;&#x27;:
+                    t.error(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                default:
+<span id="H2">                    t.doctypePending.publicIdentifier.append(c);</span>
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    AfterDoctypePublicIdentifier {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H2">                    t.transition(BetweenDoctypePublicAndSystemIdentifiers);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&gt;&#x27;:
+<span id="H2">                    t.emitDoctypePending();</span>
+<span id="H2">                    t.transition(Data);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&quot;&#x27;:
+<span id="H2">                    t.error(this);</span>
+                    // system id empty
+<span id="H2">                    t.transition(DoctypeSystemIdentifier_doubleQuoted);</span>
+<span id="H2">                    break;</span>
+                case &#x27;\&#x27;&#x27;:
+<span id="H2">                    t.error(this);</span>
+                    // system id empty
+<span id="H2">                    t.transition(DoctypeSystemIdentifier_singleQuoted);</span>
+<span id="H2">                    break;</span>
+                case eof:
+                    t.eofError(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                default:
+                    t.error(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.transition(BogusDoctype);
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    BetweenDoctypePublicAndSystemIdentifiers {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H2">                    break;</span>
+                case &#x27;&gt;&#x27;:
+<span id="H2">                    t.emitDoctypePending();</span>
+<span id="H2">                    t.transition(Data);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&quot;&#x27;:
+<span id="H2">                    t.error(this);</span>
+                    // system id empty
+<span id="H2">                    t.transition(DoctypeSystemIdentifier_doubleQuoted);</span>
+<span id="H2">                    break;</span>
+                case &#x27;\&#x27;&#x27;:
+<span id="H2">                    t.error(this);</span>
+                    // system id empty
+<span id="H2">                    t.transition(DoctypeSystemIdentifier_singleQuoted);</span>
+<span id="H2">                    break;</span>
+                case eof:
+                    t.eofError(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                default:
+                    t.error(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.transition(BogusDoctype);
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    AfterDoctypeSystemKeyword {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H2">                    t.transition(BeforeDoctypeSystemIdentifier);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&gt;&#x27;:
+                    t.error(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                case &#x27;&quot;&#x27;:
+<span id="H2">                    t.error(this);</span>
+                    // system id empty
+<span id="H2">                    t.transition(DoctypeSystemIdentifier_doubleQuoted);</span>
+<span id="H2">                    break;</span>
+                case &#x27;\&#x27;&#x27;:
+<span id="H2">                    t.error(this);</span>
+                    // system id empty
+<span id="H2">                    t.transition(DoctypeSystemIdentifier_singleQuoted);</span>
+<span id="H2">                    break;</span>
+                case eof:
+                    t.eofError(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                default:
+                    t.error(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    BeforeDoctypeSystemIdentifier {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H2">                    break;</span>
+                case &#x27;&quot;&#x27;:
+                    // set system id to empty string
+<span id="H2">                    t.transition(DoctypeSystemIdentifier_doubleQuoted);</span>
+<span id="H2">                    break;</span>
+                case &#x27;\&#x27;&#x27;:
+                    // set public id to empty string
+<span id="H2">                    t.transition(DoctypeSystemIdentifier_singleQuoted);</span>
+<span id="H2">                    break;</span>
+                case &#x27;&gt;&#x27;:
+                    t.error(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                default:
+                    t.error(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.transition(BogusDoctype);
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    DoctypeSystemIdentifier_doubleQuoted {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;&quot;&#x27;:
+<span id="H2">                    t.transition(AfterDoctypeSystemIdentifier);</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    t.doctypePending.systemIdentifier.append(replacementChar);
+                    break;
+                case &#x27;&gt;&#x27;:
+                    t.error(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                default:
+<span id="H2">                    t.doctypePending.systemIdentifier.append(c);</span>
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    DoctypeSystemIdentifier_singleQuoted {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;\&#x27;&#x27;:
+<span id="H2">                    t.transition(AfterDoctypeSystemIdentifier);</span>
+<span id="H2">                    break;</span>
+                case nullChar:
+                    t.error(this);
+                    t.doctypePending.systemIdentifier.append(replacementChar);
+                    break;
+                case &#x27;&gt;&#x27;:
+                    t.error(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                case eof:
+                    t.eofError(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                default:
+<span id="H2">                    t.doctypePending.systemIdentifier.append(c);</span>
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    AfterDoctypeSystemIdentifier {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H2">            char c = r.consume();</span>
+<span id="H2">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H2">                    break;</span>
+                case &#x27;&gt;&#x27;:
+<span id="H2">                    t.emitDoctypePending();</span>
+<span id="H2">                    t.transition(Data);</span>
+<span id="H2">                    break;</span>
+                case eof:
+                    t.eofError(this);
+                    t.doctypePending.forceQuirks = true;
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                default:
+                    t.error(this);
+                    t.transition(BogusDoctype);
+                    // NOT force quirks
+            }
+<span id="H2">        }</span>
+    },
+<span id="H0">    BogusDoctype {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+            char c = r.consume();
+            switch (c) {
+                case &#x27;&gt;&#x27;:
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                case eof:
+                    t.emitDoctypePending();
+                    t.transition(Data);
+                    break;
+                default:
+                    // ignore char
+                    break;
+            }
+        }
+    },
+<span id="H0">    CdataSection {</span>
+        @Override void read(Tokeniser t, CharacterReader r) {
+<span id="H1">            String data = r.consumeTo(&quot;]]&gt;&quot;);</span>
+<span id="H1">            t.dataBuffer.append(data);</span>
+<span id="H1">            if (r.matchConsume(&quot;]]&gt;&quot;) || r.isEmpty()) {</span>
+<span id="H1">                t.emit(new Token.CData(t.dataBuffer.toString()));</span>
+<span id="H1">                t.transition(Data);</span>
+            }// otherwise, buffer underrun, stay in data section
+<span id="H1">        }</span>
+    };
+
+
+    abstract void read(Tokeniser t, CharacterReader r);
+
+    static final char nullChar = &#x27;\u0000&#x27;;
+    // char searches. must be sorted, used in inSorted. MUST update TokenisetStateTest if more arrays are added.
+<span id="H0">    static final char[] attributeNameCharsSorted = new char[]{&#x27;\t&#x27;, &#x27;\n&#x27;, &#x27;\f&#x27;, &#x27;\r&#x27;, &#x27; &#x27;, &#x27;&quot;&#x27;, &#x27;\&#x27;&#x27;, &#x27;/&#x27;, &#x27;&lt;&#x27;, &#x27;=&#x27;, &#x27;&gt;&#x27;};</span>
+<span id="H0">    static final char[] attributeValueUnquoted = new char[]{nullChar, &#x27;\t&#x27;, &#x27;\n&#x27;, &#x27;\f&#x27;, &#x27;\r&#x27;, &#x27; &#x27;, &#x27;&quot;&#x27;, &#x27;&amp;&#x27;, &#x27;\&#x27;&#x27;, &#x27;&lt;&#x27;, &#x27;=&#x27;, &#x27;&gt;&#x27;, &#x27;`&#x27;};</span>
+
+    private static final char replacementChar = Tokeniser.replacementChar;
+<span id="H0">    private static final String replacementStr = String.valueOf(Tokeniser.replacementChar);</span>
+    private static final char eof = CharacterReader.EOF;
+
+    /**
+     * Handles RawtextEndTagName, ScriptDataEndTagName, and ScriptDataEscapedEndTagName. Same body impl, just
+     * different else exit transitions.
+     */
+    private static void handleDataEndTag(Tokeniser t, CharacterReader r, TokeniserState elseTransition) {
+<span id="H1">        if (r.matchesLetter()) {</span>
+<span id="H1">            String name = r.consumeLetterSequence();</span>
+<span id="H1">            t.tagPending.appendTagName(name);</span>
+<span id="H1">            t.dataBuffer.append(name);</span>
+<span id="H1">            return;</span>
+        }
+
+<span id="H1">        boolean needsExitTransition = false;</span>
+<span id="H1">        if (t.isAppropriateEndTagToken() &amp;&amp; !r.isEmpty()) {</span>
+<span id="H1">            char c = r.consume();</span>
+<span id="H1">            switch (c) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+<span id="H2">                    t.transition(BeforeAttributeName);</span>
+<span id="H2">                    break;</span>
+                case &#x27;/&#x27;:
+                    t.transition(SelfClosingStartTag);
+                    break;
+                case &#x27;&gt;&#x27;:
+<span id="H1">                    t.emitTagPending();</span>
+<span id="H1">                    t.transition(Data);</span>
+<span id="H1">                    break;</span>
+                default:
+<span id="H2">                    t.dataBuffer.append(c);</span>
+<span id="H2">                    needsExitTransition = true;</span>
+            }
+<span id="H1">        } else {</span>
+<span id="H2">            needsExitTransition = true;</span>
+        }
+
+<span id="H1">        if (needsExitTransition) {</span>
+<span id="H2">            t.emit(&quot;&lt;/&quot;);</span>
+<span id="H2">            t.emit(t.dataBuffer);</span>
+<span id="H2">            t.transition(elseTransition);</span>
+        }
+<span id="H1">    }</span>
+
+    private static void readRawData(Tokeniser t, CharacterReader r, TokeniserState current, TokeniserState advance) {
+<span id="H1">        switch (r.current()) {</span>
+            case &#x27;&lt;&#x27;:
+<span id="H1">                t.advanceTransition(advance);</span>
+<span id="H1">                break;</span>
+            case nullChar:
+                t.error(current);
+                r.advance();
+                t.emit(replacementChar);
+                break;
+            case eof:
+<span id="H2">                t.emit(new Token.EOF());</span>
+<span id="H2">                break;</span>
+            default:
+<span id="H2">                String data = r.consumeRawData();</span>
+<span id="H2">                t.emit(data);</span>
+                break;
+        }
+<span id="H1">    }</span>
+
+    private static void readCharRef(Tokeniser t, TokeniserState advance) {
+<span id="H1">        int[] c = t.consumeCharacterReference(null, false);</span>
+<span id="H1">        if (c == null)</span>
+<span id="H2">            t.emit(&#x27;&amp;&#x27;);</span>
+        else
+<span id="H1">            t.emit(c);</span>
+<span id="H1">        t.transition(advance);</span>
+<span id="H1">    }</span>
+
+    private static void readEndTag(Tokeniser t, CharacterReader r, TokeniserState a, TokeniserState b) {
+<span id="H1">        if (r.matchesAsciiAlpha()) {</span>
+<span id="H1">            t.createTagPending(false);</span>
+<span id="H1">            t.transition(a);</span>
+        } else {
+<span id="H2">            t.emit(&quot;&lt;/&quot;);</span>
+<span id="H2">            t.transition(b);</span>
+        }
+<span id="H1">    }</span>
+
+    private static void handleDataDoubleEscapeTag(Tokeniser t, CharacterReader r, TokeniserState primary, TokeniserState fallback) {
+<span id="H2">        if (r.matchesLetter()) {</span>
+<span id="H2">            String name = r.consumeLetterSequence();</span>
+<span id="H2">            t.dataBuffer.append(name);</span>
+<span id="H2">            t.emit(name);</span>
+<span id="H2">            return;</span>
+        }
+
+<span id="H2">        char c = r.consume();</span>
+<span id="H2">        switch (c) {</span>
+            case &#x27;\t&#x27;:
+            case &#x27;\n&#x27;:
+            case &#x27;\r&#x27;:
+            case &#x27;\f&#x27;:
+            case &#x27; &#x27;:
+            case &#x27;/&#x27;:
+            case &#x27;&gt;&#x27;:
+<span id="H2">                if (t.dataBuffer.toString().equals(&quot;script&quot;))</span>
+<span id="H2">                    t.transition(primary);</span>
+                else
+                    t.transition(fallback);
+<span id="H2">                t.emit(c);</span>
+<span id="H2">                break;</span>
+            default:
+                r.unconsume();
+                t.transition(fallback);
+        }
+<span id="H2">    }</span>
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

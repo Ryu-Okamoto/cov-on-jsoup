@@ -1,0 +1,62 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/select/Collector.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">select</a>/Collector.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.select;
+
+import org.jsoup.nodes.Element;
+import org.jspecify.annotations.Nullable;
+
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+/**
+ * Collects a list of elements that match the supplied criteria.
+ *
+ * @author Jonathan Hedley
+ */
+public class Collector {
+
+    private Collector() {}
+
+    /**
+     Build a list of elements, by visiting root and every descendant of root, and testing it against the evaluator.
+     @param eval Evaluator to test elements against
+     @param root root of tree to descend
+     @return list of matches; empty if none
+     */
+    public static Elements collect (Evaluator eval, Element root) {
+<span id="H1">        eval.reset();</span>
+
+<span id="H1">        return root.stream()</span>
+<span id="H1">            .filter(eval.asPredicate(root))</span>
+<span id="H1">            .collect(Collectors.toCollection(Elements::new));</span>
+    }
+
+    /**
+     Finds the first Element that matches the Evaluator that descends from the root, and stops the query once that first
+     match is found.
+     @param eval Evaluator to test elements against
+     @param root root of tree to descend
+     @return the first match; {@code null} if none
+     */
+    public static @Nullable Element findFirst(Evaluator eval, Element root) {
+<span id="H1">        eval.reset();</span>
+
+<span id="H1">        Optional&lt;Element&gt; first = root.stream().filter(eval.asPredicate(root)).findFirst();</span>
+<span id="H1">        return first.orElse(null);</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

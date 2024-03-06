@@ -1,0 +1,73 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/examples/ListLinks.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">examples</a>/ListLinks.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.examples;
+
+import org.jsoup.Jsoup;
+import org.jsoup.helper.Validate;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
+
+import java.io.IOException;
+
+/**
+ * Example program to list links from a URL.
+ */
+public class ListLinks {
+    public static void main(String[] args) throws IOException {
+        Validate.isTrue(args.length == 1, &quot;usage: supply url to fetch&quot;);
+        String url = args[0];
+        print(&quot;Fetching %s...&quot;, url);
+
+        Document doc = Jsoup.connect(url).get();
+        Elements links = doc.select(&quot;a[href]&quot;);
+        Elements media = doc.select(&quot;[src]&quot;);
+        Elements imports = doc.select(&quot;link[href]&quot;);
+
+        print(&quot;\nMedia: (%d)&quot;, media.size());
+        for (Element src : media) {
+            if (src.normalName().equals(&quot;img&quot;))
+                print(&quot; * %s: &lt;%s&gt; %sx%s (%s)&quot;,
+                        src.tagName(), src.attr(&quot;abs:src&quot;), src.attr(&quot;width&quot;), src.attr(&quot;height&quot;),
+                        trim(src.attr(&quot;alt&quot;), 20));
+            else
+                print(&quot; * %s: &lt;%s&gt;&quot;, src.tagName(), src.attr(&quot;abs:src&quot;));
+        }
+
+        print(&quot;\nImports: (%d)&quot;, imports.size());
+        for (Element link : imports) {
+            print(&quot; * %s &lt;%s&gt; (%s)&quot;, link.tagName(),link.attr(&quot;abs:href&quot;), link.attr(&quot;rel&quot;));
+        }
+
+        print(&quot;\nLinks: (%d)&quot;, links.size());
+        for (Element link : links) {
+            print(&quot; * a: &lt;%s&gt;  (%s)&quot;, link.attr(&quot;abs:href&quot;), trim(link.text(), 35));
+        }
+    }
+
+    private static void print(String msg, Object... args) {
+        System.out.println(String.format(msg, args));
+    }
+
+    private static String trim(String s, int width) {
+        if (s.length() &gt; width)
+            return s.substring(0, width-1) + &quot;.&quot;;
+        else
+            return s;
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

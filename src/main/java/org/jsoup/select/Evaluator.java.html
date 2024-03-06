@@ -1,0 +1,1016 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/select/Evaluator.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">select</a>/Evaluator.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.select;
+
+import org.jsoup.helper.Validate;
+import org.jsoup.nodes.Comment;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.DocumentType;
+import org.jsoup.nodes.Element;
+import org.jsoup.nodes.Node;
+import org.jsoup.nodes.PseudoTextElement;
+import org.jsoup.nodes.TextNode;
+import org.jsoup.nodes.XmlDeclaration;
+import org.jsoup.parser.ParseSettings;
+
+import java.util.List;
+import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import static org.jsoup.internal.Normalizer.lowerCase;
+import static org.jsoup.internal.Normalizer.normalize;
+import static org.jsoup.internal.StringUtil.normaliseWhitespace;
+
+
+/**
+ * Evaluates that an element matches the selector.
+ */
+public abstract class Evaluator {
+<span id="H1">    protected Evaluator() {</span>
+<span id="H1">    }</span>
+
+    /**
+     Provides a Predicate for this Evaluator, matching the test Element.
+     * @param root the root Element, for match evaluation
+     * @return a predicate that accepts an Element to test for matches with this Evaluator
+     * @since 1.17.1
+     */
+    public Predicate&lt;Element&gt; asPredicate(Element root) {
+<span id="H1">        return element -&gt; matches(root, element);</span>
+    }
+
+    /**
+     * Test if the element meets the evaluator&#x27;s requirements.
+     *
+     * @param root    Root of the matching subtree
+     * @param element tested element
+     * @return Returns &lt;tt&gt;true&lt;/tt&gt; if the requirements are met or
+     * &lt;tt&gt;false&lt;/tt&gt; otherwise
+     */
+    public abstract boolean matches(Element root, Element element);
+
+    /**
+     Reset any internal state in this Evaluator before executing a new Collector evaluation.
+     */
+    protected void reset() {
+<span id="H1">    }</span>
+
+    /**
+     A relative evaluator cost function. During evaluation, Evaluators are sorted by ascending cost as an optimization.
+     * @return the relative cost of this Evaluator
+     */
+    protected int cost() {
+<span id="H2">        return 5; // a nominal default cost</span>
+    }
+
+    /**
+     * Evaluator for tag name
+     */
+    public static final class Tag extends Evaluator {
+        private final String tagName;
+
+<span id="H1">        public Tag(String tagName) {</span>
+<span id="H1">            this.tagName = tagName;</span>
+<span id="H1">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H1">            return (element.normalName().equals(tagName));</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 1;</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H2">            return String.format(&quot;%s&quot;, tagName);</span>
+        }
+    }
+
+
+    /**
+     * Evaluator for tag name that ends with
+     */
+    public static final class TagEndsWith extends Evaluator {
+        private final String tagName;
+
+<span id="H2">        public TagEndsWith(String tagName) {</span>
+<span id="H2">            this.tagName = tagName;</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            return (element.normalName().endsWith(tagName));</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;%s&quot;, tagName);
+        }
+    }
+
+    /**
+     * Evaluator for element id
+     */
+    public static final class Id extends Evaluator {
+        private final String id;
+
+<span id="H1">        public Id(String id) {</span>
+<span id="H1">            this.id = id;</span>
+<span id="H1">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H1">            return (id.equals(element.id()));</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 2;</span>
+        }
+        @Override
+        public String toString() {
+            return String.format(&quot;#%s&quot;, id);
+        }
+    }
+
+    /**
+     * Evaluator for element class
+     */
+    public static final class Class extends Evaluator {
+        private final String className;
+
+<span id="H2">        public Class(String className) {</span>
+<span id="H2">            this.className = className;</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            return (element.hasClass(className));</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 6; // does whitespace scanning</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H2">            return String.format(&quot;.%s&quot;, className);</span>
+        }
+
+    }
+
+    /**
+     * Evaluator for attribute name matching
+     */
+    public static final class Attribute extends Evaluator {
+        private final String key;
+
+<span id="H2">        public Attribute(String key) {</span>
+<span id="H2">            this.key = key;</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            return element.hasAttr(key);</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 2;</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;[%s]&quot;, key);
+        }
+    }
+
+    /**
+     * Evaluator for attribute name prefix matching
+     */
+    public static final class AttributeStarting extends Evaluator {
+        private final String keyPrefix;
+
+<span id="H2">        public AttributeStarting(String keyPrefix) {</span>
+<span id="H2">            Validate.notEmpty(keyPrefix);</span>
+<span id="H2">            this.keyPrefix = lowerCase(keyPrefix);</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            List&lt;org.jsoup.nodes.Attribute&gt; values = element.attributes().asList();</span>
+<span id="H2">            for (org.jsoup.nodes.Attribute attribute : values) {</span>
+<span id="H2">                if (lowerCase(attribute.getKey()).startsWith(keyPrefix))</span>
+<span id="H2">                    return true;</span>
+<span id="H2">            }</span>
+<span id="H2">            return false;</span>
+        }
+
+        @Override protected int cost() {
+            return 6;
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;[^%s]&quot;, keyPrefix);
+        }
+
+    }
+
+    /**
+     * Evaluator for attribute name/value matching
+     */
+    public static final class AttributeWithValue extends AttributeKeyPair {
+        public AttributeWithValue(String key, String value) {
+<span id="H2">            super(key, value);</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            return element.hasAttr(key) &amp;&amp; value.equalsIgnoreCase(element.attr(key).trim());</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 3;</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;[%s=%s]&quot;, key, value);
+        }
+
+    }
+
+    /**
+     * Evaluator for attribute name != value matching
+     */
+    public static final class AttributeWithValueNot extends AttributeKeyPair {
+        public AttributeWithValueNot(String key, String value) {
+<span id="H2">            super(key, value);</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            return !value.equalsIgnoreCase(element.attr(key));</span>
+        }
+
+        @Override protected int cost() {
+            return 3;
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;[%s!=%s]&quot;, key, value);
+        }
+
+    }
+
+    /**
+     * Evaluator for attribute name/value matching (value prefix)
+     */
+    public static final class AttributeWithValueStarting extends AttributeKeyPair {
+        public AttributeWithValueStarting(String key, String value) {
+<span id="H1">            super(key, value, false);</span>
+<span id="H1">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H1">            return element.hasAttr(key) &amp;&amp; lowerCase(element.attr(key)).startsWith(value); // value is lower case already</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 4;</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;[%s^=%s]&quot;, key, value);
+        }
+    }
+
+    /**
+     * Evaluator for attribute name/value matching (value ending)
+     */
+    public static final class AttributeWithValueEnding extends AttributeKeyPair {
+        public AttributeWithValueEnding(String key, String value) {
+<span id="H1">            super(key, value, false);</span>
+<span id="H1">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H1">            return element.hasAttr(key) &amp;&amp; lowerCase(element.attr(key)).endsWith(value); // value is lower case</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 4;</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;[%s$=%s]&quot;, key, value);
+        }
+    }
+
+    /**
+     * Evaluator for attribute name/value matching (value containing)
+     */
+    public static final class AttributeWithValueContaining extends AttributeKeyPair {
+        public AttributeWithValueContaining(String key, String value) {
+<span id="H1">            super(key, value);</span>
+<span id="H1">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H1">            return element.hasAttr(key) &amp;&amp; lowerCase(element.attr(key)).contains(value); // value is lower case</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 6;</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;[%s*=%s]&quot;, key, value);
+        }
+
+    }
+
+    /**
+     * Evaluator for attribute name/value matching (value regex matching)
+     */
+    public static final class AttributeWithValueMatching extends Evaluator {
+        final String key;
+        final Pattern pattern;
+
+<span id="H1">        public AttributeWithValueMatching(String key, Pattern pattern) {</span>
+<span id="H1">            this.key = normalize(key);</span>
+<span id="H1">            this.pattern = pattern;</span>
+<span id="H1">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H1">            return element.hasAttr(key) &amp;&amp; pattern.matcher(element.attr(key)).find();</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 8;</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;[%s~=%s]&quot;, key, pattern.toString());
+        }
+
+    }
+
+    /**
+     * Abstract evaluator for attribute name/value matching
+     */
+    public abstract static class AttributeKeyPair extends Evaluator {
+        final String key;
+        final String value;
+
+        public AttributeKeyPair(String key, String value) {
+<span id="H1">            this(key, value, true);</span>
+<span id="H1">        }</span>
+
+<span id="H1">        public AttributeKeyPair(String key, String value, boolean trimValue) {</span>
+<span id="H1">            Validate.notEmpty(key);</span>
+<span id="H1">            Validate.notEmpty(value);</span>
+
+<span id="H1">            this.key = normalize(key);</span>
+<span id="H1">            boolean isStringLiteral = value.startsWith(&quot;&#x27;&quot;) &amp;&amp; value.endsWith(&quot;&#x27;&quot;)</span>
+<span id="H1">                                        || value.startsWith(&quot;\&quot;&quot;) &amp;&amp; value.endsWith(&quot;\&quot;&quot;);</span>
+<span id="H1">            if (isStringLiteral) {</span>
+<span id="H2">                value = value.substring(1, value.length()-1);</span>
+            }
+
+<span id="H1">            this.value = trimValue ? normalize(value) : normalize(value, isStringLiteral);</span>
+<span id="H1">        }</span>
+    }
+
+    /**
+     * Evaluator for any / all element matching
+     */
+<span id="H2">    public static final class AllElements extends Evaluator {</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            return true;</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 10;</span>
+        }
+
+        @Override
+        public String toString() {
+            return &quot;*&quot;;
+        }
+    }
+
+    /**
+     * Evaluator for matching by sibling index number (e {@literal &lt;} idx)
+     */
+    public static final class IndexLessThan extends IndexEvaluator {
+        public IndexLessThan(int index) {
+<span id="H2">            super(index);</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            return root != element &amp;&amp; element.elementSiblingIndex() &lt; index;</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;:lt(%d)&quot;, index);
+        }
+
+    }
+
+    /**
+     * Evaluator for matching by sibling index number (e {@literal &gt;} idx)
+     */
+    public static final class IndexGreaterThan extends IndexEvaluator {
+        public IndexGreaterThan(int index) {
+<span id="H2">            super(index);</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            return element.elementSiblingIndex() &gt; index;</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;:gt(%d)&quot;, index);
+        }
+
+    }
+
+    /**
+     * Evaluator for matching by sibling index number (e = idx)
+     */
+    public static final class IndexEquals extends IndexEvaluator {
+        public IndexEquals(int index) {
+<span id="H1">            super(index);</span>
+<span id="H1">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H1">            return element.elementSiblingIndex() == index;</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;:eq(%d)&quot;, index);
+        }
+
+    }
+
+    /**
+     * Evaluator for matching the last sibling (css :last-child)
+     */
+<span id="H2">    public static final class IsLastChild extends Evaluator {</span>
+		@Override
+		public boolean matches(Element root, Element element) {
+<span id="H2">			final Element p = element.parent();</span>
+<span id="H2">			return p != null &amp;&amp; !(p instanceof Document) &amp;&amp; element == p.lastElementChild();</span>
+		}
+
+		@Override
+		public String toString() {
+			return &quot;:last-child&quot;;
+		}
+    }
+
+    public static final class IsFirstOfType extends IsNthOfType {
+		public IsFirstOfType() {
+<span id="H2">			super(0,1);</span>
+<span id="H2">		}</span>
+		@Override
+		public String toString() {
+			return &quot;:first-of-type&quot;;
+		}
+    }
+
+    public static final class IsLastOfType extends IsNthLastOfType {
+		public IsLastOfType() {
+<span id="H2">			super(0,1);</span>
+<span id="H2">		}</span>
+		@Override
+		public String toString() {
+			return &quot;:last-of-type&quot;;
+		}
+    }
+
+
+    public static abstract class CssNthEvaluator extends Evaluator {
+    	protected final int a, b;
+
+<span id="H2">    	public CssNthEvaluator(int a, int b) {</span>
+<span id="H2">    		this.a = a;</span>
+<span id="H2">    		this.b = b;</span>
+<span id="H2">    	}</span>
+    	public CssNthEvaluator(int b) {
+    		this(0,b);
+    	}
+
+    	@Override
+    	public boolean matches(Element root, Element element) {
+<span id="H2">    		final Element p = element.parent();</span>
+<span id="H2">    		if (p == null || (p instanceof Document)) return false;</span>
+
+<span id="H2">    		final int pos = calculatePosition(root, element);</span>
+<span id="H2">    		if (a == 0) return pos == b;</span>
+
+<span id="H3">    		return (pos-b)*a &gt;= 0 &amp;&amp; (pos-b)%a==0;</span>
+    	}
+
+		@Override
+		public String toString() {
+			if (a == 0)
+				return String.format(&quot;:%s(%d)&quot;,getPseudoClass(), b);
+			if (b == 0)
+				return String.format(&quot;:%s(%dn)&quot;,getPseudoClass(), a);
+			return String.format(&quot;:%s(%dn%+d)&quot;, getPseudoClass(),a, b);
+		}
+
+		protected abstract String getPseudoClass();
+		protected abstract int calculatePosition(Element root, Element element);
+    }
+
+
+    /**
+     * css-compatible Evaluator for :eq (css :nth-child)
+     *
+     * @see IndexEquals
+     */
+    public static final class IsNthChild extends CssNthEvaluator {
+
+    	public IsNthChild(int a, int b) {
+<span id="H2">    		super(a,b);</span>
+<span id="H2">		}</span>
+
+		@Override protected int calculatePosition(Element root, Element element) {
+<span id="H2">			return element.elementSiblingIndex()+1;</span>
+		}
+
+
+		@Override protected String getPseudoClass() {
+			return &quot;nth-child&quot;;
+		}
+    }
+
+    /**
+     * css pseudo class :nth-last-child)
+     *
+     * @see IndexEquals
+     */
+    public static final class IsNthLastChild extends CssNthEvaluator {
+    	public IsNthLastChild(int a, int b) {
+<span id="H2">    		super(a,b);</span>
+<span id="H2">    	}</span>
+
+        @Override
+        protected int calculatePosition(Element root, Element element) {
+<span id="H2">    	    if (element.parent() == null)</span>
+    	        return 0;
+<span id="H2">        	return element.parent().childrenSize()- element.elementSiblingIndex();</span>
+        }
+
+		@Override
+		protected String getPseudoClass() {
+			return &quot;nth-last-child&quot;;
+		}
+    }
+
+    /**
+     * css pseudo class nth-of-type
+     *
+     */
+    public static class IsNthOfType extends CssNthEvaluator {
+        public IsNthOfType(int a, int b) {
+<span id="H2">            super(a, b);</span>
+<span id="H2">        }</span>
+
+        @Override protected int calculatePosition(Element root, Element element) {
+<span id="H2">            Element parent = element.parent();</span>
+<span id="H2">            if (parent == null)</span>
+                return 0;
+
+<span id="H2">            int pos = 0;</span>
+<span id="H2">            final int size = parent.childNodeSize();</span>
+<span id="H2">            for (int i = 0; i &lt; size; i++) {</span>
+<span id="H2">                Node node = parent.childNode(i);</span>
+<span id="H2">                if (node.normalName().equals(element.normalName())) pos++;</span>
+<span id="H2">                if (node == element) break;</span>
+            }
+<span id="H2">            return pos;</span>
+        }
+
+        @Override
+        protected String getPseudoClass() {
+            return &quot;nth-of-type&quot;;
+        }
+    }
+
+    public static class IsNthLastOfType extends CssNthEvaluator {
+
+        public IsNthLastOfType(int a, int b) {
+<span id="H2">            super(a, b);</span>
+<span id="H2">        }</span>
+
+        @Override
+        protected int calculatePosition(Element root, Element element) {
+<span id="H2">            Element parent = element.parent();</span>
+<span id="H2">            if (parent == null)</span>
+                return 0;
+
+<span id="H2">            int pos = 0;</span>
+<span id="H2">            Element next = element;</span>
+<span id="H2">            while (next != null) {</span>
+<span id="H2">                if (next.normalName().equals(element.normalName()))</span>
+<span id="H2">                    pos++;</span>
+<span id="H2">                next = next.nextElementSibling();</span>
+            }
+<span id="H2">            return pos;</span>
+        }
+
+        @Override
+        protected String getPseudoClass() {
+            return &quot;nth-last-of-type&quot;;
+        }
+    }
+
+    /**
+     * Evaluator for matching the first sibling (css :first-child)
+     */
+<span id="H2">    public static final class IsFirstChild extends Evaluator {</span>
+    	@Override
+    	public boolean matches(Element root, Element element) {
+<span id="H2">    		final Element p = element.parent();</span>
+<span id="H2">    		return p != null &amp;&amp; !(p instanceof Document) &amp;&amp; element == p.firstElementChild();</span>
+    	}
+
+    	@Override
+    	public String toString() {
+    		return &quot;:first-child&quot;;
+    	}
+    }
+
+    /**
+     * css3 pseudo-class :root
+     * @see &lt;a href=&quot;http://www.w3.org/TR/selectors/#root-pseudo&quot;&gt;:root selector&lt;/a&gt;
+     *
+     */
+<span id="H2">    public static final class IsRoot extends Evaluator {</span>
+    	@Override
+    	public boolean matches(Element root, Element element) {
+<span id="H2">    		final Element r = root instanceof Document ? root.firstElementChild() : root;</span>
+<span id="H2">    		return element == r;</span>
+    	}
+
+        @Override protected int cost() {
+<span id="H3">            return 1;</span>
+        }
+
+    	@Override
+    	public String toString() {
+    		return &quot;:root&quot;;
+    	}
+    }
+
+<span id="H2">    public static final class IsOnlyChild extends Evaluator {</span>
+		@Override
+		public boolean matches(Element root, Element element) {
+<span id="H2">			final Element p = element.parent();</span>
+<span id="H2">			return p!=null &amp;&amp; !(p instanceof Document) &amp;&amp; element.siblingElements().isEmpty();</span>
+		}
+    	@Override
+    	public String toString() {
+    		return &quot;:only-child&quot;;
+    	}
+    }
+
+<span id="H2">    public static final class IsOnlyOfType extends Evaluator {</span>
+		@Override
+		public boolean matches(Element root, Element element) {
+<span id="H2">			final Element p = element.parent();</span>
+<span id="H2">			if (p==null || p instanceof Document) return false;</span>
+
+<span id="H2">			int pos = 0;</span>
+<span id="H2">            Element next = p.firstElementChild();</span>
+<span id="H2">            while (next != null) {</span>
+<span id="H2">                if (next.normalName().equals(element.normalName()))</span>
+<span id="H2">                    pos++;</span>
+<span id="H2">                if (pos &gt; 1)</span>
+<span id="H2">                    break;</span>
+<span id="H2">                next = next.nextElementSibling();</span>
+            }
+<span id="H2">        	return pos == 1;</span>
+		}
+    	@Override
+    	public String toString() {
+    		return &quot;:only-of-type&quot;;
+    	}
+    }
+
+<span id="H2">    public static final class IsEmpty extends Evaluator {</span>
+		@Override
+		public boolean matches(Element root, Element element) {
+<span id="H2">        	List&lt;Node&gt; family = element.childNodes();</span>
+<span id="H2">            for (Node n : family) {</span>
+<span id="H2">                if (n instanceof TextNode)</span>
+<span id="H2">                    return ((TextNode)n).isBlank();</span>
+<span id="H2">                if (!(n instanceof Comment || n instanceof XmlDeclaration || n instanceof DocumentType))</span>
+<span id="H2">                    return false;</span>
+<span id="H2">            }</span>
+<span id="H2">        	return true;</span>
+		}
+    	@Override
+    	public String toString() {
+    		return &quot;:empty&quot;;
+    	}
+    }
+
+    /**
+     * Abstract evaluator for sibling index matching
+     *
+     * @author ant
+     */
+    public abstract static class IndexEvaluator extends Evaluator {
+        final int index;
+
+<span id="H1">        public IndexEvaluator(int index) {</span>
+<span id="H1">            this.index = index;</span>
+<span id="H1">        }</span>
+    }
+
+    /**
+     * Evaluator for matching Element (and its descendants) text
+     */
+    public static final class ContainsText extends Evaluator {
+        private final String searchText;
+
+<span id="H2">        public ContainsText(String searchText) {</span>
+<span id="H2">            this.searchText = lowerCase(normaliseWhitespace(searchText));</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            return lowerCase(element.text()).contains(searchText);</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 10;</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;:contains(%s)&quot;, searchText);
+        }
+    }
+
+    /**
+     * Evaluator for matching Element (and its descendants) wholeText. Neither the input nor the element text is
+     * normalized. &lt;code&gt;:containsWholeText()&lt;/code&gt;
+     * @since 1.15.1.
+     */
+    public static final class ContainsWholeText extends Evaluator {
+        private final String searchText;
+
+<span id="H2">        public ContainsWholeText(String searchText) {</span>
+<span id="H2">            this.searchText = searchText;</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            return element.wholeText().contains(searchText);</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 10;</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;:containsWholeText(%s)&quot;, searchText);
+        }
+    }
+
+    /**
+     * Evaluator for matching Element (but &lt;b&gt;not&lt;/b&gt; its descendants) wholeText. Neither the input nor the element text is
+     * normalized. &lt;code&gt;:containsWholeOwnText()&lt;/code&gt;
+     * @since 1.15.1.
+     */
+    public static final class ContainsWholeOwnText extends Evaluator {
+        private final String searchText;
+
+<span id="H2">        public ContainsWholeOwnText(String searchText) {</span>
+<span id="H2">            this.searchText = searchText;</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            return element.wholeOwnText().contains(searchText);</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;:containsWholeOwnText(%s)&quot;, searchText);
+        }
+    }
+
+    /**
+     * Evaluator for matching Element (and its descendants) data
+     */
+    public static final class ContainsData extends Evaluator {
+        private final String searchText;
+
+        public ContainsData(String searchText) {
+            this.searchText = lowerCase(searchText);
+        }
+
+        @Override
+        public boolean matches(Element root, Element element) {
+            return lowerCase(element.data()).contains(searchText); // not whitespace normalized
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;:containsData(%s)&quot;, searchText);
+        }
+    }
+
+    /**
+     * Evaluator for matching Element&#x27;s own text
+     */
+    public static final class ContainsOwnText extends Evaluator {
+        private final String searchText;
+
+<span id="H2">        public ContainsOwnText(String searchText) {</span>
+<span id="H2">            this.searchText = lowerCase(normaliseWhitespace(searchText));</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            return lowerCase(element.ownText()).contains(searchText);</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;:containsOwn(%s)&quot;, searchText);
+        }
+    }
+
+    /**
+     * Evaluator for matching Element (and its descendants) text with regex
+     */
+    public static final class Matches extends Evaluator {
+        private final Pattern pattern;
+
+<span id="H2">        public Matches(Pattern pattern) {</span>
+<span id="H2">            this.pattern = pattern;</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            Matcher m = pattern.matcher(element.text());</span>
+<span id="H2">            return m.find();</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 8;</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;:matches(%s)&quot;, pattern);
+        }
+    }
+
+    /**
+     * Evaluator for matching Element&#x27;s own text with regex
+     */
+    public static final class MatchesOwn extends Evaluator {
+        private final Pattern pattern;
+
+<span id="H2">        public MatchesOwn(Pattern pattern) {</span>
+<span id="H2">            this.pattern = pattern;</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            Matcher m = pattern.matcher(element.ownText());</span>
+<span id="H2">            return m.find();</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 7;</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;:matchesOwn(%s)&quot;, pattern);
+        }
+    }
+
+    /**
+     * Evaluator for matching Element (and its descendants) whole text with regex.
+     * @since 1.15.1.
+     */
+    public static final class MatchesWholeText extends Evaluator {
+        private final Pattern pattern;
+
+<span id="H2">        public MatchesWholeText(Pattern pattern) {</span>
+<span id="H2">            this.pattern = pattern;</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            Matcher m = pattern.matcher(element.wholeText());</span>
+<span id="H2">            return m.find();</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 8;</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;:matchesWholeText(%s)&quot;, pattern);
+        }
+    }
+
+    /**
+     * Evaluator for matching Element&#x27;s own whole text with regex.
+     * @since 1.15.1.
+     */
+    public static final class MatchesWholeOwnText extends Evaluator {
+        private final Pattern pattern;
+
+<span id="H2">        public MatchesWholeOwnText(Pattern pattern) {</span>
+<span id="H2">            this.pattern = pattern;</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            Matcher m = pattern.matcher(element.wholeOwnText());</span>
+<span id="H2">            return m.find();</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return 7;</span>
+        }
+
+        @Override
+        public String toString() {
+            return String.format(&quot;:matchesWholeOwnText(%s)&quot;, pattern);
+        }
+    }
+
+<span id="H2">    public static final class MatchText extends Evaluator {</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            if (element instanceof PseudoTextElement)</span>
+<span id="H2">                return true;</span>
+
+<span id="H2">            List&lt;TextNode&gt; textNodes = element.textNodes();</span>
+<span id="H2">            for (TextNode textNode : textNodes) {</span>
+<span id="H2">                PseudoTextElement pel = new PseudoTextElement(</span>
+<span id="H2">                    org.jsoup.parser.Tag.valueOf(element.tagName(), element.tag().namespace(), ParseSettings.preserveCase), element.baseUri(), element.attributes());</span>
+<span id="H2">                textNode.replaceWith(pel);</span>
+<span id="H2">                pel.appendChild(textNode);</span>
+<span id="H2">            }</span>
+<span id="H2">            return false;</span>
+        }
+
+        @Override protected int cost() {
+<span id="H2">            return -1; // forces first evaluation, which prepares the DOM for later evaluator matches</span>
+        }
+
+        @Override
+        public String toString() {
+            return &quot;:matchText&quot;;
+        }
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

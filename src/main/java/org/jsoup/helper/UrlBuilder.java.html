@@ -1,0 +1,118 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/helper/UrlBuilder.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">helper</a>/UrlBuilder.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.helper;
+
+import org.jsoup.Connection;
+import org.jsoup.internal.StringUtil;
+import org.jspecify.annotations.Nullable;
+
+import java.io.UnsupportedEncodingException;
+import java.net.IDN;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
+
+import static org.jsoup.helper.DataUtil.UTF_8;
+
+/**
+ A utility class to normalize input URLs. jsoup internal; API subject to change.
+ &lt;p&gt;Normalization includes puny-coding the host, and encoding non-ascii path components. Any non-ascii characters in
+ the query string (or the fragment/anchor) are escaped, but any existing escapes in those components are preserved.&lt;/p&gt;
+ */
+<span id="H1">final class UrlBuilder {</span>
+    URL u;
+    @Nullable StringBuilder q;
+
+<span id="H1">    UrlBuilder(URL inputUrl) {</span>
+<span id="H1">        this.u = inputUrl;</span>
+<span id="H1">        if (u.getQuery() != null)</span>
+<span id="H1">            q = StringUtil.borrowBuilder().append(u.getQuery());</span>
+<span id="H1">    }</span>
+
+    URL build() {
+        try {
+            // use the URI class to encode non-ascii in path
+<span id="H1">            URI uri = new URI(</span>
+<span id="H1">                u.getProtocol(),</span>
+<span id="H1">                u.getUserInfo(),</span>
+<span id="H1">                IDN.toASCII(decodePart(u.getHost())), // puny-code</span>
+<span id="H1">                u.getPort(),</span>
+                null, null, null // path, query and fragment appended later so as not to encode
+            );
+
+<span id="H1">            StringBuilder normUrl = StringUtil.borrowBuilder().append(uri.toASCIIString());</span>
+<span id="H1">            appendToAscii(u.getPath(), false, normUrl);</span>
+<span id="H1">            if (q != null) {</span>
+<span id="H1">                normUrl.append(&#x27;?&#x27;);</span>
+<span id="H1">                appendToAscii(StringUtil.releaseBuilder(q), true, normUrl);</span>
+            }
+<span id="H1">            if (u.getRef() != null) {</span>
+<span id="H1">                normUrl.append(&#x27;#&#x27;);</span>
+<span id="H1">                appendToAscii(u.getRef(), false, normUrl);</span>
+            }
+<span id="H1">            u = new URL(StringUtil.releaseBuilder(normUrl));</span>
+<span id="H1">            return u;</span>
+        } catch (MalformedURLException | URISyntaxException | UnsupportedEncodingException e) {
+            // we assert here so that any incomplete normalization issues can be caught in devel. but in practise,
+            // the remote end will be able to handle it, so in prod we just pass the original URL.
+            // The UnsupportedEncodingException would never happen as always UTF8
+            assert Validate.assertFail(e.toString());
+            return u;
+        }
+    }
+
+    void appendKeyVal(Connection.KeyVal kv) throws UnsupportedEncodingException {
+<span id="H2">        if (q == null)</span>
+<span id="H2">            q = StringUtil.borrowBuilder();</span>
+        else
+<span id="H2">            q.append(&#x27;&amp;&#x27;);</span>
+<span id="H2">        q</span>
+<span id="H2">            .append(URLEncoder.encode(kv.key(), UTF_8.name()))</span>
+<span id="H2">            .append(&#x27;=&#x27;)</span>
+<span id="H2">            .append(URLEncoder.encode(kv.value(), UTF_8.name()));</span>
+<span id="H2">    }</span>
+
+    private static String decodePart(String encoded) {
+        try {
+<span id="H1">            return URLDecoder.decode(encoded, UTF_8.name());</span>
+        } catch (UnsupportedEncodingException e) {
+            throw new RuntimeException(e); // wtf!
+        }
+    }
+
+    private static void appendToAscii(String s, boolean spaceAsPlus, StringBuilder sb) throws UnsupportedEncodingException {
+        // minimal normalization of Unicode -&gt; Ascii, and space normal. Existing escapes are left as-is.
+<span id="H1">        for (int i = 0; i &lt; s.length(); i++) {</span>
+<span id="H1">            int c = s.codePointAt(i);</span>
+<span id="H1">            if (c == &#x27; &#x27;) {</span>
+<span id="H2">                sb.append(spaceAsPlus ? &#x27;+&#x27; : &quot;%20&quot;);</span>
+<span id="H1">            } else if (c &gt; 127) { // out of ascii range</span>
+<span id="H1">                sb.append(URLEncoder.encode(new String(Character.toChars(c)), UTF_8.name()));</span>
+                // ^^ is a bit heavy-handed - if perf critical, we could optimize
+<span id="H1">                if (Character.charCount(c) == 2) i++; // advance past supplemental</span>
+            } else {
+<span id="H1">                sb.append((char) c);</span>
+            }
+        }
+<span id="H1">    }</span>
+
+
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

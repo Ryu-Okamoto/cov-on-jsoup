@@ -1,0 +1,80 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/parser/ParseError.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">parser</a>/ParseError.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.parser;
+
+/**
+ * A Parse Error records an error in the input HTML that occurs in either the tokenisation or the tree building phase.
+ */
+public class ParseError {
+    private final int pos;
+    private final String cursorPos;
+    private final String errorMsg;
+
+<span id="H1">    ParseError(CharacterReader reader, String errorMsg) {</span>
+<span id="H1">        pos = reader.pos();</span>
+<span id="H1">        cursorPos = reader.posLineCol();</span>
+<span id="H1">        this.errorMsg = errorMsg;</span>
+<span id="H1">    }</span>
+
+<span id="H1">    ParseError(CharacterReader reader, String errorFormat, Object... args) {</span>
+<span id="H1">        pos = reader.pos();</span>
+<span id="H1">        cursorPos = reader.posLineCol();</span>
+<span id="H1">        this.errorMsg = String.format(errorFormat, args);</span>
+<span id="H1">    }</span>
+
+    ParseError(int pos, String errorMsg) {
+        this.pos = pos;
+        cursorPos = String.valueOf(pos);
+        this.errorMsg = errorMsg;
+    }
+
+    ParseError(int pos, String errorFormat, Object... args) {
+        this.pos = pos;
+        cursorPos = String.valueOf(pos);
+        this.errorMsg = String.format(errorFormat, args);
+    }
+
+    /**
+     * Retrieve the error message.
+     * @return the error message.
+     */
+    public String getErrorMessage() {
+<span id="H2">        return errorMsg;</span>
+    }
+
+    /**
+     * Retrieves the offset of the error.
+     * @return error offset within input
+     */
+    public int getPosition() {
+<span id="H1">        return pos;</span>
+    }
+
+    /**
+     Get the formatted line:column cursor position where the error occurred.
+     @return line:number cursor position
+     */
+    public String getCursorPos() {
+        return cursorPos;
+    }
+
+    @Override
+    public String toString() {
+<span id="H2">        return &quot;&lt;&quot; + cursorPos + &quot;&gt;: &quot; + errorMsg;</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

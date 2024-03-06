@@ -1,0 +1,397 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/internal/StringUtil.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">internal</a>/StringUtil.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.internal;
+
+import org.jsoup.helper.Validate;
+import org.jspecify.annotations.Nullable;
+
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.Stack;
+import java.util.regex.Pattern;
+
+/**
+ A minimal String utility class. Designed for &lt;b&gt;internal&lt;/b&gt; jsoup use only - the API and outcome may change without
+ notice.
+ */
+public final class StringUtil {
+    // memoised padding up to 21 (blocks 0 to 20 spaces)
+<span id="H0">    static final String[] padding = {&quot;&quot;, &quot; &quot;, &quot;  &quot;, &quot;   &quot;, &quot;    &quot;, &quot;     &quot;, &quot;      &quot;, &quot;       &quot;, &quot;        &quot;,</span>
+        &quot;         &quot;, &quot;          &quot;, &quot;           &quot;, &quot;            &quot;, &quot;             &quot;, &quot;              &quot;, &quot;               &quot;,
+        &quot;                &quot;, &quot;                 &quot;, &quot;                  &quot;, &quot;                   &quot;, &quot;                    &quot;};
+
+    /**
+     * Join a collection of strings by a separator
+     * @param strings collection of string objects
+     * @param sep string to place between strings
+     * @return joined string
+     */
+    public static String join(Collection&lt;?&gt; strings, String sep) {
+<span id="H1">        return join(strings.iterator(), sep);</span>
+    }
+
+    /**
+     * Join a collection of strings by a separator
+     * @param strings iterator of string objects
+     * @param sep string to place between strings
+     * @return joined string
+     */
+    public static String join(Iterator&lt;?&gt; strings, String sep) {
+<span id="H1">        if (!strings.hasNext())</span>
+            return &quot;&quot;;
+
+<span id="H1">        String start = strings.next().toString();</span>
+<span id="H1">        if (!strings.hasNext()) // only one, avoid builder</span>
+<span id="H1">            return start;</span>
+
+<span id="H1">        StringJoiner j = new StringJoiner(sep);</span>
+<span id="H1">        j.add(start);</span>
+<span id="H1">        while (strings.hasNext()) {</span>
+<span id="H1">            j.add(strings.next());</span>
+        }
+<span id="H1">        return j.complete();</span>
+    }
+
+    /**
+     * Join an array of strings by a separator
+     * @param strings collection of string objects
+     * @param sep string to place between strings
+     * @return joined string
+     */
+    public static String join(String[] strings, String sep) {
+<span id="H2">        return join(Arrays.asList(strings), sep);</span>
+    }
+
+    /**
+     A StringJoiner allows incremental / filtered joining of a set of stringable objects.
+     @since 1.14.1
+     */
+    public static class StringJoiner {
+<span id="H1">        @Nullable StringBuilder sb = borrowBuilder(); // sets null on builder release so can&#x27;t accidentally be reused</span>
+        final String separator;
+<span id="H1">        boolean first = true;</span>
+
+        /**
+         Create a new joiner, that uses the specified separator. MUST call {@link #complete()} or will leak a thread
+         local string builder.
+
+         @param separator the token to insert between strings
+         */
+<span id="H1">        public StringJoiner(String separator) {</span>
+<span id="H1">            this.separator = separator;</span>
+<span id="H1">        }</span>
+
+        /**
+         Add another item to the joiner, will be separated
+         */
+        public StringJoiner add(Object stringy) {
+<span id="H1">            Validate.notNull(sb); // don&#x27;t reuse</span>
+<span id="H1">            if (!first)</span>
+<span id="H1">                sb.append(separator);</span>
+<span id="H1">            sb.append(stringy);</span>
+<span id="H1">            first = false;</span>
+<span id="H1">            return this;</span>
+        }
+
+        /**
+         Append content to the current item; not separated
+         */
+        public StringJoiner append(Object stringy) {
+            Validate.notNull(sb); // don&#x27;t reuse
+            sb.append(stringy);
+            return this;
+        }
+
+        /**
+         Return the joined string, and release the builder back to the pool. This joiner cannot be reused.
+         */
+        public String complete() {
+<span id="H1">            String string = releaseBuilder(sb);</span>
+<span id="H1">            sb = null;</span>
+<span id="H1">            return string;</span>
+        }
+    }
+
+    /**
+     * Returns space padding (up to the default max of 30). Use {@link #padding(int, int)} to specify a different limit.
+     * @param width amount of padding desired
+     * @return string of spaces * width
+     * @see #padding(int, int) 
+      */
+    public static String padding(int width) {
+<span id="H1">        return padding(width, 30);</span>
+    }
+
+    /**
+     * Returns space padding, up to a max of maxPaddingWidth.
+     * @param width amount of padding desired
+     * @param maxPaddingWidth maximum padding to apply. Set to {@code -1} for unlimited.
+     * @return string of spaces * width
+     */
+    public static String padding(int width, int maxPaddingWidth) {
+<span id="H1">        Validate.isTrue(width &gt;= 0, &quot;width must be &gt;= 0&quot;);</span>
+<span id="H1">        Validate.isTrue(maxPaddingWidth &gt;= -1);</span>
+<span id="H1">        if (maxPaddingWidth != -1)</span>
+<span id="H1">            width = Math.min(width, maxPaddingWidth);</span>
+<span id="H1">        if (width &lt; padding.length)</span>
+<span id="H1">            return padding[width];        </span>
+<span id="H1">        char[] out = new char[width];</span>
+<span id="H1">        for (int i = 0; i &lt; width; i++)</span>
+<span id="H1">            out[i] = &#x27; &#x27;;</span>
+<span id="H1">        return String.valueOf(out);</span>
+    }
+
+    /**
+     * Tests if a string is blank: null, empty, or only whitespace (&quot; &quot;, \r\n, \t, etc)
+     * @param string string to test
+     * @return if string is blank
+     */
+    public static boolean isBlank(final String string) {
+<span id="H1">        if (string == null || string.length() == 0)</span>
+<span id="H1">            return true;</span>
+
+<span id="H2">        int l = string.length();</span>
+<span id="H2">        for (int i = 0; i &lt; l; i++) {</span>
+<span id="H2">            if (!StringUtil.isWhitespace(string.codePointAt(i)))</span>
+<span id="H2">                return false;</span>
+        }
+<span id="H2">        return true;</span>
+    }
+
+    /**
+     Tests if a string starts with a newline character
+     @param string string to test
+     @return if its first character is a newline
+     */
+    public static boolean startsWithNewline(final String string) {
+        if (string == null || string.length() == 0)
+            return false;
+        return string.charAt(0) == &#x27;\n&#x27;;
+    }
+
+    /**
+     * Tests if a string is numeric, i.e. contains only digit characters
+     * @param string string to test
+     * @return true if only digit chars, false if empty or null or contains non-digit chars
+     */
+    public static boolean isNumeric(String string) {
+<span id="H1">        if (string == null || string.length() == 0)</span>
+<span id="H1">            return false;</span>
+
+<span id="H1">        int l = string.length();</span>
+<span id="H1">        for (int i = 0; i &lt; l; i++) {</span>
+<span id="H1">            if (!Character.isDigit(string.codePointAt(i)))</span>
+<span id="H1">                return false;</span>
+        }
+<span id="H1">        return true;</span>
+    }
+
+    /**
+     * Tests if a code point is &quot;whitespace&quot; as defined in the HTML spec. Used for output HTML.
+     * @param c code point to test
+     * @return true if code point is whitespace, false otherwise
+     * @see #isActuallyWhitespace(int)
+     */
+    public static boolean isWhitespace(int c){
+<span id="H1">        return c == &#x27; &#x27; || c == &#x27;\t&#x27; || c == &#x27;\n&#x27; || c == &#x27;\f&#x27; || c == &#x27;\r&#x27;;</span>
+    }
+
+    /**
+     * Tests if a code point is &quot;whitespace&quot; as defined by what it looks like. Used for Element.text etc.
+     * @param c code point to test
+     * @return true if code point is whitespace, false otherwise
+     */
+    public static boolean isActuallyWhitespace(int c){
+<span id="H1">        return c == &#x27; &#x27; || c == &#x27;\t&#x27; || c == &#x27;\n&#x27; || c == &#x27;\f&#x27; || c == &#x27;\r&#x27; || c == 160;</span>
+        // 160 is &amp;nbsp; (non-breaking space). Not in the spec but expected.
+    }
+
+    public static boolean isInvisibleChar(int c) {
+<span id="H1">        return c == 8203 || c == 173; // zero width sp, soft hyphen</span>
+        // previously also included zw non join, zw join - but removing those breaks semantic meaning of text
+    }
+
+    /**
+     * Normalise the whitespace within this string; multiple spaces collapse to a single, and all whitespace characters
+     * (e.g. newline, tab) convert to a simple space.
+     * @param string content to normalise
+     * @return normalised string
+     */
+    public static String normaliseWhitespace(String string) {
+<span id="H1">        StringBuilder sb = StringUtil.borrowBuilder();</span>
+<span id="H1">        appendNormalisedWhitespace(sb, string, false);</span>
+<span id="H1">        return StringUtil.releaseBuilder(sb);</span>
+    }
+
+    /**
+     * After normalizing the whitespace within a string, appends it to a string builder.
+     * @param accum builder to append to
+     * @param string string to normalize whitespace within
+     * @param stripLeading set to true if you wish to remove any leading whitespace
+     */
+    public static void appendNormalisedWhitespace(StringBuilder accum, String string, boolean stripLeading) {
+<span id="H1">        boolean lastWasWhite = false;</span>
+<span id="H1">        boolean reachedNonWhite = false;</span>
+
+<span id="H1">        int len = string.length();</span>
+        int c;
+<span id="H1">        for (int i = 0; i &lt; len; i+= Character.charCount(c)) {</span>
+<span id="H1">            c = string.codePointAt(i);</span>
+<span id="H1">            if (isActuallyWhitespace(c)) {</span>
+<span id="H1">                if ((stripLeading &amp;&amp; !reachedNonWhite) || lastWasWhite)</span>
+<span id="H1">                    continue;</span>
+<span id="H1">                accum.append(&#x27; &#x27;);</span>
+<span id="H1">                lastWasWhite = true;</span>
+            }
+<span id="H1">            else if (!isInvisibleChar(c)) {</span>
+<span id="H1">                accum.appendCodePoint(c);</span>
+<span id="H1">                lastWasWhite = false;</span>
+<span id="H1">                reachedNonWhite = true;</span>
+            }
+        }
+<span id="H1">    }</span>
+
+    public static boolean in(final String needle, final String... haystack) {
+<span id="H1">        final int len = haystack.length;</span>
+<span id="H1">        for (int i = 0; i &lt; len; i++) {</span>
+<span id="H1">            if (haystack[i].equals(needle))</span>
+<span id="H2">               return true;</span>
+        }
+<span id="H1">        return false;</span>
+    }
+
+    public static boolean inSorted(String needle, String[] haystack) {
+<span id="H1">        return Arrays.binarySearch(haystack, needle) &gt;= 0;</span>
+    }
+
+    /**
+     Tests that a String contains only ASCII characters.
+     @param string scanned string
+     @return true if all characters are in range 0 - 127
+     */
+    public static boolean isAscii(String string) {
+<span id="H1">        Validate.notNull(string);</span>
+<span id="H1">        for (int i = 0; i &lt; string.length(); i++) {</span>
+<span id="H1">            int c = string.charAt(i);</span>
+<span id="H1">            if (c &gt; 127) { // ascii range</span>
+<span id="H1">                return false;</span>
+            }
+        }
+<span id="H1">        return true;</span>
+    }
+
+<span id="H0">    private static final Pattern extraDotSegmentsPattern = Pattern.compile(&quot;^/((\\.{1,2}/)+)&quot;);</span>
+    /**
+     * Create a new absolute URL, from a provided existing absolute URL and a relative URL component.
+     * @param base the existing absolute base URL
+     * @param relUrl the relative URL to resolve. (If it&#x27;s already absolute, it will be returned)
+     * @return the resolved absolute URL
+     * @throws MalformedURLException if an error occurred generating the URL
+     */
+    public static URL resolve(URL base, String relUrl) throws MalformedURLException {
+<span id="H1">        relUrl = stripControlChars(relUrl);</span>
+        // workaround: java resolves &#x27;//path/file + ?foo&#x27; to &#x27;//path/?foo&#x27;, not &#x27;//path/file?foo&#x27; as desired
+<span id="H1">        if (relUrl.startsWith(&quot;?&quot;))</span>
+<span id="H3">            relUrl = base.getPath() + relUrl;</span>
+        // workaround: //example.com + ./foo = //example.com/./foo, not //example.com/foo
+<span id="H1">        URL url = new URL(base, relUrl);</span>
+<span id="H1">        String fixedFile = extraDotSegmentsPattern.matcher(url.getFile()).replaceFirst(&quot;/&quot;);</span>
+<span id="H1">        if (url.getRef() != null) {</span>
+<span id="H2">            fixedFile = fixedFile + &quot;#&quot; + url.getRef();</span>
+        }
+<span id="H1">        return new URL(url.getProtocol(), url.getHost(), url.getPort(), fixedFile);</span>
+    }
+
+    /**
+     * Create a new absolute URL, from a provided existing absolute URL and a relative URL component.
+     * @param baseUrl the existing absolute base URL
+     * @param relUrl the relative URL to resolve. (If it&#x27;s already absolute, it will be returned)
+     * @return an absolute URL if one was able to be generated, or the empty string if not
+     */
+    public static String resolve(String baseUrl, String relUrl) {
+        // workaround: java will allow control chars in a path URL and may treat as relative, but Chrome / Firefox will strip and may see as a scheme. Normalize to browser&#x27;s view.
+<span id="H1">        baseUrl = stripControlChars(baseUrl); relUrl = stripControlChars(relUrl);</span>
+        try {
+            URL base;
+            try {
+<span id="H1">                base = new URL(baseUrl);</span>
+<span id="H1">            } catch (MalformedURLException e) {</span>
+                // the base is unsuitable, but the attribute/rel may be abs on its own, so try that
+<span id="H2">                URL abs = new URL(relUrl);</span>
+<span id="H2">                return abs.toExternalForm();</span>
+<span id="H1">            }</span>
+<span id="H1">            return resolve(base, relUrl).toExternalForm();</span>
+<span id="H1">        } catch (MalformedURLException e) {</span>
+            // it may still be valid, just that Java doesn&#x27;t have a registered stream handler for it, e.g. tel
+            // we test here vs at start to normalize supported URLs (e.g. HTTP -&gt; http)
+<span id="H1">            return validUriScheme.matcher(relUrl).find() ? relUrl : &quot;&quot;;</span>
+        }
+    }
+<span id="H0">    private static final Pattern validUriScheme = Pattern.compile(&quot;^[a-zA-Z][a-zA-Z0-9+-.]*:&quot;);</span>
+
+<span id="H0">    private static final Pattern controlChars = Pattern.compile(&quot;[\\x00-\\x1f]*&quot;); // matches ascii 0 - 31, to strip from url</span>
+    private static String stripControlChars(final String input) {
+<span id="H1">        return controlChars.matcher(input).replaceAll(&quot;&quot;);</span>
+    }
+
+<span id="H0">    private static final ThreadLocal&lt;Stack&lt;StringBuilder&gt;&gt; threadLocalBuilders = ThreadLocal.withInitial(Stack::new);</span>
+
+    /**
+     * Maintains cached StringBuilders in a flyweight pattern, to minimize new StringBuilder GCs. The StringBuilder is
+     * prevented from growing too large.
+     * &lt;p&gt;
+     * Care must be taken to release the builder once its work has been completed, with {@link #releaseBuilder}
+     * @return an empty StringBuilder
+     */
+    public static StringBuilder borrowBuilder() {
+<span id="H1">        Stack&lt;StringBuilder&gt; builders = threadLocalBuilders.get();</span>
+<span id="H1">        return builders.empty() ?</span>
+<span id="H1">            new StringBuilder(MaxCachedBuilderSize) :</span>
+<span id="H1">            builders.pop();</span>
+    }
+
+    /**
+     * Release a borrowed builder. Care must be taken not to use the builder after it has been returned, as its
+     * contents may be changed by this method, or by a concurrent thread.
+     * @param sb the StringBuilder to release.
+     * @return the string value of the released String Builder (as an incentive to release it!).
+     */
+    public static String releaseBuilder(StringBuilder sb) {
+<span id="H1">        Validate.notNull(sb);</span>
+<span id="H1">        String string = sb.toString();</span>
+
+<span id="H1">        if (sb.length() &gt; MaxCachedBuilderSize)</span>
+<span id="H1">            sb = new StringBuilder(MaxCachedBuilderSize); // make sure it hasn&#x27;t grown too big</span>
+        else
+<span id="H1">            sb.delete(0, sb.length()); // make sure it&#x27;s emptied on release</span>
+
+<span id="H1">        Stack&lt;StringBuilder&gt; builders = threadLocalBuilders.get();</span>
+<span id="H1">        builders.push(sb);</span>
+
+<span id="H1">        while (builders.size() &gt; MaxIdleBuilders) {</span>
+            builders.pop();
+        }
+<span id="H1">        return string;</span>
+    }
+
+    private static final int MaxCachedBuilderSize = 8 * 1024;
+    private static final int MaxIdleBuilders = 8;
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

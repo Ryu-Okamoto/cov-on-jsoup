@@ -1,0 +1,142 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/nodes/FormElement.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">nodes</a>/FormElement.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.nodes;
+
+import org.jsoup.Connection;
+import org.jsoup.Jsoup;
+import org.jsoup.helper.HttpConnection;
+import org.jsoup.helper.Validate;
+import org.jsoup.parser.Tag;
+import org.jsoup.select.Elements;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * A HTML Form Element provides ready access to the form fields/controls that are associated with it. It also allows a
+ * form to easily be submitted.
+ */
+public class FormElement extends Element {
+<span id="H1">    private final Elements elements = new Elements();</span>
+
+    /**
+     * Create a new, standalone form element.
+     *
+     * @param tag        tag of this element
+     * @param baseUri    the base URI
+     * @param attributes initial attributes
+     */
+    public FormElement(Tag tag, String baseUri, Attributes attributes) {
+<span id="H1">        super(tag, baseUri, attributes);</span>
+<span id="H1">    }</span>
+
+    /**
+     * Get the list of form control elements associated with this form.
+     * @return form controls associated with this element.
+     */
+    public Elements elements() {
+<span id="H2">        return elements;</span>
+    }
+
+    /**
+     * Add a form control element to this form.
+     * @param element form control to add
+     * @return this form element, for chaining
+     */
+    public FormElement addElement(Element element) {
+<span id="H2">        elements.add(element);</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    protected void removeChild(Node out) {
+<span id="H2">        super.removeChild(out);</span>
+<span id="H2">        elements.remove(out);</span>
+<span id="H2">    }</span>
+
+    /**
+     Prepare to submit this form. A Connection object is created with the request set up from the form values. This
+     Connection will inherit the settings and the cookies (etc) of the connection/session used to request this Document
+     (if any), as available in {@link Document#connection()}
+     &lt;p&gt;You can then set up other options (like user-agent, timeout, cookies), then execute it.&lt;/p&gt;
+
+     @return a connection prepared from the values of this form, in the same session as the one used to request it
+     @throws IllegalArgumentException if the form&#x27;s absolute action URL cannot be determined. Make sure you pass the
+     document&#x27;s base URI when parsing.
+     */
+    public Connection submit() {
+<span id="H2">        String action = hasAttr(&quot;action&quot;) ? absUrl(&quot;action&quot;) : baseUri();</span>
+<span id="H2">        Validate.notEmpty(action, &quot;Could not determine a form action URL for submit. Ensure you set a base URI when parsing.&quot;);</span>
+<span id="H2">        Connection.Method method = attr(&quot;method&quot;).equalsIgnoreCase(&quot;POST&quot;) ?</span>
+<span id="H2">                Connection.Method.POST : Connection.Method.GET;</span>
+
+<span id="H2">        Document owner = ownerDocument();</span>
+<span id="H2">        Connection connection = owner != null? owner.connection().newRequest() : Jsoup.newSession();</span>
+<span id="H2">        return connection.url(action)</span>
+<span id="H2">                .data(formData())</span>
+<span id="H2">                .method(method);</span>
+    }
+
+    /**
+     * Get the data that this form submits. The returned list is a copy of the data, and changes to the contents of the
+     * list will not be reflected in the DOM.
+     * @return a list of key vals
+     */
+    public List&lt;Connection.KeyVal&gt; formData() {
+<span id="H2">        ArrayList&lt;Connection.KeyVal&gt; data = new ArrayList&lt;&gt;();</span>
+
+        // iterate the form control elements and accumulate their values
+<span id="H2">        for (Element el: elements) {</span>
+<span id="H2">            if (!el.tag().isFormSubmittable()) continue; // contents are form listable, superset of submitable</span>
+<span id="H2">            if (el.hasAttr(&quot;disabled&quot;)) continue; // skip disabled form inputs</span>
+<span id="H2">            String name = el.attr(&quot;name&quot;);</span>
+<span id="H2">            if (name.length() == 0) continue;</span>
+<span id="H2">            String type = el.attr(&quot;type&quot;);</span>
+
+<span id="H2">            if (type.equalsIgnoreCase(&quot;button&quot;) || type.equalsIgnoreCase(&quot;image&quot;)) continue; // browsers don&#x27;t submit these</span>
+
+<span id="H2">            if (&quot;select&quot;.equals(el.normalName())) {</span>
+<span id="H2">                Elements options = el.select(&quot;option[selected]&quot;);</span>
+<span id="H2">                boolean set = false;</span>
+<span id="H2">                for (Element option: options) {</span>
+<span id="H2">                    data.add(HttpConnection.KeyVal.create(name, option.val()));</span>
+<span id="H2">                    set = true;</span>
+<span id="H2">                }</span>
+<span id="H2">                if (!set) {</span>
+                    Element option = el.selectFirst(&quot;option&quot;);
+                    if (option != null)
+                        data.add(HttpConnection.KeyVal.create(name, option.val()));
+                }
+<span id="H2">            } else if (&quot;checkbox&quot;.equalsIgnoreCase(type) || &quot;radio&quot;.equalsIgnoreCase(type)) {</span>
+                // only add checkbox or radio if they have the checked attribute
+<span id="H2">                if (el.hasAttr(&quot;checked&quot;)) {</span>
+<span id="H2">                    final String val = el.val().length() &gt;  0 ? el.val() : &quot;on&quot;;</span>
+<span id="H2">                    data.add(HttpConnection.KeyVal.create(name, val));</span>
+<span id="H2">                }</span>
+            } else {
+<span id="H2">                data.add(HttpConnection.KeyVal.create(name, el.val()));</span>
+            }
+<span id="H2">        }</span>
+<span id="H2">        return data;</span>
+    }
+
+    @Override
+    public FormElement clone() {
+        return (FormElement) super.clone();
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

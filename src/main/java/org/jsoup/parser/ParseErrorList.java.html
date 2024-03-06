@@ -1,0 +1,67 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/parser/ParseErrorList.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">parser</a>/ParseErrorList.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.parser;
+
+import java.util.ArrayList;
+
+/**
+ * A container for ParseErrors.
+ * 
+ * @author Jonathan Hedley
+ */
+public class ParseErrorList extends ArrayList&lt;ParseError&gt;{
+    private static final int INITIAL_CAPACITY = 16;
+    private final int initialCapacity;
+    private final int maxSize;
+    
+    ParseErrorList(int initialCapacity, int maxSize) {
+<span id="H1">        super(initialCapacity);</span>
+<span id="H1">        this.initialCapacity = initialCapacity;</span>
+<span id="H1">        this.maxSize = maxSize;</span>
+<span id="H1">    }</span>
+
+    /**
+     Create a new ParseErrorList with the same settings, but no errors in the list
+     @param copy initial and max size details to copy
+     */
+    ParseErrorList(ParseErrorList copy) {
+<span id="H2">        this(copy.initialCapacity, copy.maxSize);</span>
+<span id="H2">    }</span>
+    
+    boolean canAddError() {
+<span id="H1">        return size() &lt; maxSize;</span>
+    }
+
+    int getMaxSize() {
+<span id="H1">        return maxSize;</span>
+    }
+
+    public static ParseErrorList noTracking() {
+<span id="H1">        return new ParseErrorList(0, 0);</span>
+    }
+    
+    public static ParseErrorList tracking(int maxSize) {
+<span id="H1">        return new ParseErrorList(INITIAL_CAPACITY, maxSize);</span>
+    }
+
+    @Override
+    public Object clone() {
+        // all class fields are primitive, so native clone is enough.
+        return super.clone();
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

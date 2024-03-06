@@ -1,0 +1,678 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/nodes/Document.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">nodes</a>/Document.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.nodes;
+
+import org.jsoup.Connection;
+import org.jsoup.Jsoup;
+import org.jsoup.helper.DataUtil;
+import org.jsoup.helper.Validate;
+import org.jsoup.internal.StringUtil;
+import org.jsoup.parser.ParseSettings;
+import org.jsoup.parser.Parser;
+import org.jsoup.parser.Tag;
+import org.jsoup.select.Elements;
+import org.jsoup.select.Evaluator;
+import org.jsoup.select.Selector;
+import org.jspecify.annotations.Nullable;
+
+import java.nio.charset.Charset;
+import java.nio.charset.CharsetEncoder;
+import java.util.List;
+
+/**
+ A HTML Document.
+
+ @author Jonathan Hedley, jonathan@hedley.net */
+public class Document extends Element {
+    private @Nullable Connection connection; // the connection this doc was fetched from, if any
+<span id="H1">    private OutputSettings outputSettings = new OutputSettings();</span>
+    private Parser parser; // the parser used to parse this document
+<span id="H1">    private QuirksMode quirksMode = QuirksMode.noQuirks;</span>
+    private final String location;
+<span id="H1">    private boolean updateMetaCharset = false;</span>
+
+    /**
+     Create a new, empty Document, in the specified namespace.
+     @param namespace the namespace of this Document&#x27;s root node.
+     @param baseUri base URI of document
+     @see org.jsoup.Jsoup#parse
+     @see #createShell
+     */
+    public Document(String namespace, String baseUri) {
+<span id="H1">        super(Tag.valueOf(&quot;#root&quot;, namespace, ParseSettings.htmlDefault), baseUri);</span>
+<span id="H1">        this.location = baseUri;</span>
+<span id="H1">        this.parser = Parser.htmlParser(); // default, but overridable</span>
+<span id="H1">    }</span>
+
+    /**
+     Create a new, empty Document, in the HTML namespace.
+     @param baseUri base URI of document
+     @see org.jsoup.Jsoup#parse
+     @see #Document(String namespace, String baseUri)
+     */
+    public Document(String baseUri) {
+<span id="H1">        this(Parser.NamespaceHtml, baseUri);</span>
+<span id="H1">    }</span>
+
+    /**
+     Create a valid, empty shell of a document, suitable for adding more elements to.
+     @param baseUri baseUri of document
+     @return document with html, head, and body elements.
+     */
+    public static Document createShell(String baseUri) {
+<span id="H1">        Validate.notNull(baseUri);</span>
+
+<span id="H1">        Document doc = new Document(baseUri);</span>
+<span id="H1">        doc.parser = doc.parser();</span>
+<span id="H1">        Element html = doc.appendElement(&quot;html&quot;);</span>
+<span id="H1">        html.appendElement(&quot;head&quot;);</span>
+<span id="H1">        html.appendElement(&quot;body&quot;);</span>
+
+<span id="H1">        return doc;</span>
+    }
+
+    /**
+     * Get the URL this Document was parsed from. If the starting URL is a redirect,
+     * this will return the final URL from which the document was served from.
+     * &lt;p&gt;Will return an empty string if the location is unknown (e.g. if parsed from a String).
+     * @return location
+     */
+    public String location() {
+<span id="H1">        return location;</span>
+    }
+
+    /**
+     Returns the Connection (Request/Response) object that was used to fetch this document, if any; otherwise, a new
+     default Connection object. This can be used to continue a session, preserving settings and cookies, etc.
+     @return the Connection (session) associated with this Document, or an empty one otherwise.
+     @see Connection#newRequest()
+     */
+    public Connection connection() {
+<span id="H2">        if (connection == null)</span>
+<span id="H2">            return Jsoup.newSession();</span>
+        else
+<span id="H2">            return connection;</span>
+    }
+
+    /**
+     * Returns this Document&#x27;s doctype.
+     * @return document type, or null if not set
+     */
+    public @Nullable DocumentType documentType() {
+<span id="H1">        for (Node node : childNodes) {</span>
+<span id="H1">            if (node instanceof DocumentType)</span>
+<span id="H2">                return (DocumentType) node;</span>
+<span id="H1">            else if (!(node instanceof LeafNode)) // scans forward across comments, text, processing instructions etc</span>
+<span id="H1">                break;</span>
+<span id="H2">        }</span>
+<span id="H1">        return null;</span>
+        // todo - add a set document type?
+    }
+
+    /**
+     Find the root HTML element, or create it if it doesn&#x27;t exist.
+     @return the root HTML element.
+     */
+    private Element htmlEl() {
+<span id="H1">        Element el = firstElementChild();</span>
+<span id="H1">        while (el != null) {</span>
+<span id="H1">            if (el.normalName().equals(&quot;html&quot;))</span>
+<span id="H1">                return el;</span>
+<span id="H4">            el = el.nextElementSibling();</span>
+        }
+<span id="H1">        return appendElement(&quot;html&quot;);</span>
+    }
+
+    /**
+     Get this document&#x27;s {@code head} element.
+     &lt;p&gt;
+     As a side-effect, if this Document does not already have a HTML structure, it will be created. If you do not want
+     that, use {@code #selectFirst(&quot;head&quot;)} instead.
+
+     @return {@code head} element.
+     */
+    public Element head() {
+<span id="H1">        final Element html = htmlEl();</span>
+<span id="H1">        Element el = html.firstElementChild();</span>
+<span id="H1">        while (el != null) {</span>
+<span id="H1">            if (el.normalName().equals(&quot;head&quot;))</span>
+<span id="H1">                return el;</span>
+<span id="H1">            el = el.nextElementSibling();</span>
+        }
+<span id="H1">        return html.prependElement(&quot;head&quot;);</span>
+    }
+
+    /**
+     Get this document&#x27;s {@code &lt;body&gt;} or {@code &lt;frameset&gt;} element.
+     &lt;p&gt;
+     As a &lt;b&gt;side-effect&lt;/b&gt;, if this Document does not already have a HTML structure, it will be created with a {@code
+    &lt;body&gt;} element. If you do not want that, use {@code #selectFirst(&quot;body&quot;)} instead.
+
+     @return {@code body} element for documents with a {@code &lt;body&gt;}, a new {@code &lt;body&gt;} element if the document
+     had no contents, or the outermost {@code &lt;frameset&gt; element} for frameset documents.
+     */
+    public Element body() {
+<span id="H1">        final Element html = htmlEl();</span>
+<span id="H1">        Element el = html.firstElementChild();</span>
+<span id="H1">        while (el != null) {</span>
+<span id="H1">            if (&quot;body&quot;.equals(el.normalName()) || &quot;frameset&quot;.equals(el.normalName()))</span>
+<span id="H1">                return el;</span>
+<span id="H1">            el = el.nextElementSibling();</span>
+        }
+<span id="H1">        return html.appendElement(&quot;body&quot;);</span>
+    }
+
+    /**
+     Get each of the {@code &lt;form&gt;} elements contained in this document.
+     @return a List of FormElement objects, which will be empty if there are none.
+     @see Elements#forms()
+     @see FormElement#elements()
+     @since 1.15.4
+     */
+    public List&lt;FormElement&gt; forms() {
+<span id="H2">        return select(&quot;form&quot;).forms();</span>
+    }
+
+    /**
+     Selects the first {@link FormElement} in this document that matches the query. If none match, throws an
+     {@link IllegalArgumentException}.
+     @param cssQuery a {@link Selector} CSS query
+     @return the first matching {@code &lt;form&gt;} element
+     @throws IllegalArgumentException if no match is found
+     @since 1.15.4
+     */
+    public FormElement expectForm(String cssQuery) {
+<span id="H2">        Elements els = select(cssQuery);</span>
+<span id="H2">        for (Element el : els) {</span>
+<span id="H2">            if (el instanceof FormElement) return (FormElement) el;</span>
+<span id="H2">        }</span>
+        Validate.fail(&quot;No form elements matched the query &#x27;%s&#x27; in the document.&quot;, cssQuery);
+        return null; // (not really)
+    }
+
+    /**
+     Get the string contents of the document&#x27;s {@code title} element.
+     @return Trimmed title, or empty string if none set.
+     */
+    public String title() {
+        // title is a preserve whitespace tag (for document output), but normalised here
+<span id="H1">        Element titleEl = head().selectFirst(titleEval);</span>
+<span id="H1">        return titleEl != null ? StringUtil.normaliseWhitespace(titleEl.text()).trim() : &quot;&quot;;</span>
+    }
+<span id="H1">    private static final Evaluator titleEval = new Evaluator.Tag(&quot;title&quot;);</span>
+
+    /**
+     Set the document&#x27;s {@code title} element. Updates the existing element, or adds {@code title} to {@code head} if
+     not present
+     @param title string to set as title
+     */
+    public void title(String title) {
+<span id="H3">        Validate.notNull(title);</span>
+<span id="H3">        Element titleEl = head().selectFirst(titleEval);</span>
+<span id="H3">        if (titleEl == null) // add to head</span>
+<span id="H3">            titleEl = head().appendElement(&quot;title&quot;);</span>
+<span id="H3">        titleEl.text(title);</span>
+<span id="H3">    }</span>
+
+    /**
+     Create a new Element, with this document&#x27;s base uri. Does not make the new element a child of this document.
+     @param tagName element tag name (e.g. {@code a})
+     @return new element
+     */
+    public Element createElement(String tagName) {
+<span id="H2">        return new Element(Tag.valueOf(tagName, parser.defaultNamespace(), ParseSettings.preserveCase), this.baseUri());</span>
+    }
+
+    @Override
+    public String outerHtml() {
+<span id="H2">        return super.html(); // no outer wrapper tag</span>
+    }
+
+    /**
+     Set the text of the {@code body} of this document. Any existing nodes within the body will be cleared.
+     @param text unencoded text
+     @return this document
+     */
+    @Override
+    public Element text(String text) {
+<span id="H3">        body().text(text); // overridden to not nuke doc structure</span>
+<span id="H3">        return this;</span>
+    }
+
+    @Override
+    public String nodeName() {
+<span id="H1">        return &quot;#document&quot;;</span>
+    }
+    
+    /**
+     * Sets the charset used in this document. This method is equivalent
+     * to {@link OutputSettings#charset(java.nio.charset.Charset)
+     * OutputSettings.charset(Charset)} but in addition it updates the
+     * charset / encoding element within the document.
+     * 
+     * &lt;p&gt;This enables
+     * {@link #updateMetaCharsetElement(boolean) meta charset update}.&lt;/p&gt;
+     * 
+     * &lt;p&gt;If there&#x27;s no element with charset / encoding information yet it will
+     * be created. Obsolete charset / encoding definitions are removed!&lt;/p&gt;
+     * 
+     * &lt;p&gt;&lt;b&gt;Elements used:&lt;/b&gt;&lt;/p&gt;
+     * 
+     * &lt;ul&gt;
+     * &lt;li&gt;&lt;b&gt;Html:&lt;/b&gt; &lt;i&gt;&amp;lt;meta charset=&quot;CHARSET&quot;&amp;gt;&lt;/i&gt;&lt;/li&gt;
+     * &lt;li&gt;&lt;b&gt;Xml:&lt;/b&gt; &lt;i&gt;&amp;lt;?xml version=&quot;1.0&quot; encoding=&quot;CHARSET&quot;&amp;gt;&lt;/i&gt;&lt;/li&gt;
+     * &lt;/ul&gt;
+     * 
+     * @param charset Charset
+     * 
+     * @see #updateMetaCharsetElement(boolean) 
+     * @see OutputSettings#charset(java.nio.charset.Charset) 
+     */
+    public void charset(Charset charset) {
+<span id="H2">        updateMetaCharsetElement(true);</span>
+<span id="H2">        outputSettings.charset(charset);</span>
+<span id="H2">        ensureMetaCharsetElement();</span>
+<span id="H2">    }</span>
+    
+    /**
+     * Returns the charset used in this document. This method is equivalent
+     * to {@link OutputSettings#charset()}.
+     * 
+     * @return Current Charset
+     * 
+     * @see OutputSettings#charset() 
+     */
+    public Charset charset() {
+<span id="H2">        return outputSettings.charset();</span>
+    }
+    
+    /**
+     * Sets whether the element with charset information in this document is
+     * updated on changes through {@link #charset(java.nio.charset.Charset)
+     * Document.charset(Charset)} or not.
+     * 
+     * &lt;p&gt;If set to &lt;tt&gt;false&lt;/tt&gt; &lt;i&gt;(default)&lt;/i&gt; there are no elements
+     * modified.&lt;/p&gt;
+     * 
+     * @param update If &lt;tt&gt;true&lt;/tt&gt; the element updated on charset
+     * changes, &lt;tt&gt;false&lt;/tt&gt; if not
+     * 
+     * @see #charset(java.nio.charset.Charset) 
+     */
+    public void updateMetaCharsetElement(boolean update) {
+<span id="H2">        this.updateMetaCharset = update;</span>
+<span id="H2">    }</span>
+    
+    /**
+     * Returns whether the element with charset information in this document is
+     * updated on changes through {@link #charset(java.nio.charset.Charset)
+     * Document.charset(Charset)} or not.
+     * 
+     * @return Returns &lt;tt&gt;true&lt;/tt&gt; if the element is updated on charset
+     * changes, &lt;tt&gt;false&lt;/tt&gt; if not
+     */
+    public boolean updateMetaCharsetElement() {
+<span id="H1">        return updateMetaCharset;</span>
+    }
+
+    @Override
+    public Document clone() {
+<span id="H2">        Document clone = (Document) super.clone();</span>
+<span id="H2">        clone.outputSettings = this.outputSettings.clone();</span>
+<span id="H2">        return clone;</span>
+    }
+
+    @Override
+    public Document shallowClone() {
+<span id="H2">        Document clone = new Document(this.tag().namespace(), baseUri());</span>
+<span id="H2">        if (attributes != null)</span>
+<span id="H2">            clone.attributes = attributes.clone();</span>
+<span id="H2">        clone.outputSettings = this.outputSettings.clone();</span>
+<span id="H2">        return clone;</span>
+    }
+    
+    /**
+     * Ensures a meta charset (html) or xml declaration (xml) with the current
+     * encoding used. This only applies with
+     * {@link #updateMetaCharsetElement(boolean) updateMetaCharset} set to
+     * &lt;tt&gt;true&lt;/tt&gt;, otherwise this method does nothing.
+     * 
+     * &lt;ul&gt;
+     * &lt;li&gt;An existing element gets updated with the current charset&lt;/li&gt;
+     * &lt;li&gt;If there&#x27;s no element yet it will be inserted&lt;/li&gt;
+     * &lt;li&gt;Obsolete elements are removed&lt;/li&gt;
+     * &lt;/ul&gt;
+     * 
+     * &lt;p&gt;&lt;b&gt;Elements used:&lt;/b&gt;&lt;/p&gt;
+     * 
+     * &lt;ul&gt;
+     * &lt;li&gt;&lt;b&gt;Html:&lt;/b&gt; &lt;i&gt;&amp;lt;meta charset=&quot;CHARSET&quot;&amp;gt;&lt;/i&gt;&lt;/li&gt;
+     * &lt;li&gt;&lt;b&gt;Xml:&lt;/b&gt; &lt;i&gt;&amp;lt;?xml version=&quot;1.0&quot; encoding=&quot;CHARSET&quot;&amp;gt;&lt;/i&gt;&lt;/li&gt;
+     * &lt;/ul&gt;
+     */
+    private void ensureMetaCharsetElement() {
+<span id="H2">        if (updateMetaCharset) {</span>
+<span id="H2">            OutputSettings.Syntax syntax = outputSettings().syntax();</span>
+
+<span id="H2">            if (syntax == OutputSettings.Syntax.html) {</span>
+<span id="H2">                Element metaCharset = selectFirst(&quot;meta[charset]&quot;);</span>
+<span id="H2">                if (metaCharset != null) {</span>
+<span id="H2">                    metaCharset.attr(&quot;charset&quot;, charset().displayName());</span>
+                } else {
+<span id="H4">                    head().appendElement(&quot;meta&quot;).attr(&quot;charset&quot;, charset().displayName());</span>
+                }
+<span id="H2">                select(&quot;meta[name=charset]&quot;).remove(); // Remove obsolete elements</span>
+<span id="H2">            } else if (syntax == OutputSettings.Syntax.xml) {</span>
+<span id="H4">                Node node = ensureChildNodes().get(0);</span>
+<span id="H4">                if (node instanceof XmlDeclaration) {</span>
+<span id="H4">                    XmlDeclaration decl = (XmlDeclaration) node;</span>
+<span id="H4">                    if (decl.name().equals(&quot;xml&quot;)) {</span>
+<span id="H4">                        decl.attr(&quot;encoding&quot;, charset().displayName());</span>
+<span id="H4">                        if (decl.hasAttr(&quot;version&quot;))</span>
+<span id="H4">                            decl.attr(&quot;version&quot;, &quot;1.0&quot;);</span>
+                    } else {
+                        decl = new XmlDeclaration(&quot;xml&quot;, false);
+                        decl.attr(&quot;version&quot;, &quot;1.0&quot;);
+                        decl.attr(&quot;encoding&quot;, charset().displayName());
+                        prependChild(decl);
+                    }
+<span id="H4">                } else {</span>
+<span id="H4">                    XmlDeclaration decl = new XmlDeclaration(&quot;xml&quot;, false);</span>
+<span id="H4">                    decl.attr(&quot;version&quot;, &quot;1.0&quot;);</span>
+<span id="H4">                    decl.attr(&quot;encoding&quot;, charset().displayName());</span>
+<span id="H4">                    prependChild(decl);</span>
+                }
+            }
+        }
+<span id="H2">    }</span>
+    
+
+    /**
+     * A Document&#x27;s output settings control the form of the text() and html() methods.
+     */
+    public static class OutputSettings implements Cloneable {
+        /**
+         * The output serialization syntax.
+         */
+<span id="H1">        public enum Syntax {html, xml}</span>
+
+<span id="H1">        private Entities.EscapeMode escapeMode = Entities.EscapeMode.base;</span>
+        private Charset charset;
+        Entities.CoreCharset coreCharset; // fast encoders for ascii and utf8
+<span id="H1">        private final ThreadLocal&lt;CharsetEncoder&gt; encoderThreadLocal = new ThreadLocal&lt;&gt;(); // initialized by start of OuterHtmlVisitor</span>
+
+<span id="H1">        private boolean prettyPrint = true;</span>
+<span id="H1">        private boolean outline = false;</span>
+<span id="H1">        private int indentAmount = 1;</span>
+<span id="H1">        private int maxPaddingWidth = 30;</span>
+<span id="H1">        private Syntax syntax = Syntax.html;</span>
+
+<span id="H1">        public OutputSettings() {</span>
+<span id="H1">            charset(DataUtil.UTF_8);</span>
+<span id="H1">        }</span>
+        
+        /**
+         * Get the document&#x27;s current HTML escape mode: &lt;code&gt;base&lt;/code&gt;, which provides a limited set of named HTML
+         * entities and escapes other characters as numbered entities for maximum compatibility; or &lt;code&gt;extended&lt;/code&gt;,
+         * which uses the complete set of HTML named entities.
+         * &lt;p&gt;
+         * The default escape mode is &lt;code&gt;base&lt;/code&gt;.
+         * @return the document&#x27;s current escape mode
+         */
+        public Entities.EscapeMode escapeMode() {
+<span id="H1">            return escapeMode;</span>
+        }
+
+        /**
+         * Set the document&#x27;s escape mode, which determines how characters are escaped when the output character set
+         * does not support a given character:- using either a named or a numbered escape.
+         * @param escapeMode the new escape mode to use
+         * @return the document&#x27;s output settings, for chaining
+         */
+        public OutputSettings escapeMode(Entities.EscapeMode escapeMode) {
+<span id="H1">            this.escapeMode = escapeMode;</span>
+<span id="H1">            return this;</span>
+        }
+
+        /**
+         * Get the document&#x27;s current output charset, which is used to control which characters are escaped when
+         * generating HTML (via the &lt;code&gt;html()&lt;/code&gt; methods), and which are kept intact.
+         * &lt;p&gt;
+         * Where possible (when parsing from a URL or File), the document&#x27;s output charset is automatically set to the
+         * input charset. Otherwise, it defaults to UTF-8.
+         * @return the document&#x27;s current charset.
+         */
+        public Charset charset() {
+<span id="H2">            return charset;</span>
+        }
+
+        /**
+         * Update the document&#x27;s output charset.
+         * @param charset the new charset to use.
+         * @return the document&#x27;s output settings, for chaining
+         */
+        public OutputSettings charset(Charset charset) {
+<span id="H1">            this.charset = charset;</span>
+<span id="H1">            coreCharset = Entities.CoreCharset.byName(charset.name());</span>
+<span id="H1">            return this;</span>
+        }
+
+        /**
+         * Update the document&#x27;s output charset.
+         * @param charset the new charset (by name) to use.
+         * @return the document&#x27;s output settings, for chaining
+         */
+        public OutputSettings charset(String charset) {
+<span id="H1">            charset(Charset.forName(charset));</span>
+<span id="H1">            return this;</span>
+        }
+
+        CharsetEncoder prepareEncoder() {
+            // created at start of OuterHtmlVisitor so each pass has own encoder, so OutputSettings can be shared among threads
+<span id="H1">            CharsetEncoder encoder = charset.newEncoder();</span>
+<span id="H1">            encoderThreadLocal.set(encoder);</span>
+<span id="H1">            return encoder;</span>
+        }
+
+        CharsetEncoder encoder() {
+<span id="H1">            CharsetEncoder encoder = encoderThreadLocal.get();</span>
+<span id="H1">            return encoder != null ? encoder : prepareEncoder();</span>
+        }
+
+        /**
+         * Get the document&#x27;s current output syntax.
+         * @return current syntax
+         */
+        public Syntax syntax() {
+<span id="H1">            return syntax;</span>
+        }
+
+        /**
+         * Set the document&#x27;s output syntax. Either {@code html}, with empty tags and boolean attributes (etc), or
+         * {@code xml}, with self-closing tags.
+         * &lt;p&gt;When set to {@link Document.OutputSettings.Syntax#xml xml}, the {@link #escapeMode() escapeMode} is
+         * automatically set to {@link Entities.EscapeMode#xhtml}, but may be subsequently changed if desired.&lt;/p&gt;
+         * @param syntax serialization syntax
+         * @return the document&#x27;s output settings, for chaining
+         */
+        public OutputSettings syntax(Syntax syntax) {
+<span id="H1">            this.syntax = syntax;</span>
+<span id="H1">            if (syntax == Syntax.xml)</span>
+<span id="H1">                this.escapeMode(Entities.EscapeMode.xhtml);</span>
+<span id="H1">            return this;</span>
+        }
+
+        /**
+         * Get if pretty printing is enabled. Default is true. If disabled, the HTML output methods will not re-format
+         * the output, and the output will generally look like the input.
+         * @return if pretty printing is enabled.
+         */
+        public boolean prettyPrint() {
+<span id="H1">            return prettyPrint;</span>
+        }
+
+        /**
+         * Enable or disable pretty printing.
+         * @param pretty new pretty print setting
+         * @return this, for chaining
+         */
+        public OutputSettings prettyPrint(boolean pretty) {
+<span id="H1">            prettyPrint = pretty;</span>
+<span id="H1">            return this;</span>
+        }
+        
+        /**
+         * Get if outline mode is enabled. Default is false. If enabled, the HTML output methods will consider
+         * all tags as block.
+         * @return if outline mode is enabled.
+         */
+        public boolean outline() {
+<span id="H1">            return outline;</span>
+        }
+        
+        /**
+         * Enable or disable HTML outline mode.
+         * @param outlineMode new outline setting
+         * @return this, for chaining
+         */
+        public OutputSettings outline(boolean outlineMode) {
+<span id="H2">            outline = outlineMode;</span>
+<span id="H2">            return this;</span>
+        }
+
+        /**
+         * Get the current tag indent amount, used when pretty printing.
+         * @return the current indent amount
+         */
+        public int indentAmount() {
+<span id="H1">            return indentAmount;</span>
+        }
+
+        /**
+         * Set the indent amount for pretty printing
+         * @param indentAmount number of spaces to use for indenting each level. Must be {@literal &gt;=} 0.
+         * @return this, for chaining
+         */
+        public OutputSettings indentAmount(int indentAmount) {
+<span id="H2">            Validate.isTrue(indentAmount &gt;= 0);</span>
+<span id="H2">            this.indentAmount = indentAmount;</span>
+<span id="H2">            return this;</span>
+        }
+
+        /**
+         * Get the current max padding amount, used when pretty printing
+         * so very deeply nested nodes don&#x27;t get insane padding amounts.
+         * @return the current indent amount
+         */
+        public int maxPaddingWidth() {
+<span id="H1">            return maxPaddingWidth;</span>
+        }
+
+        /**
+         * Set the max padding amount for pretty printing so very deeply nested nodes don&#x27;t get insane padding amounts.
+         * @param maxPaddingWidth number of spaces to use for indenting each level of nested nodes. Must be {@literal &gt;=} -1.
+         *        Default is 30 and -1 means unlimited.
+         * @return this, for chaining
+         */
+        public OutputSettings maxPaddingWidth(int maxPaddingWidth) {
+<span id="H2">            Validate.isTrue(maxPaddingWidth &gt;= -1);</span>
+<span id="H2">            this.maxPaddingWidth = maxPaddingWidth;</span>
+<span id="H2">            return this;</span>
+        }
+
+        @Override
+        public OutputSettings clone() {
+            OutputSettings clone;
+            try {
+<span id="H1">                clone = (OutputSettings) super.clone();</span>
+            } catch (CloneNotSupportedException e) {
+                throw new RuntimeException(e);
+<span id="H1">            }</span>
+<span id="H1">            clone.charset(charset.name()); // new charset, coreCharset, and charset encoder</span>
+<span id="H1">            clone.escapeMode = Entities.EscapeMode.valueOf(escapeMode.name());</span>
+            // indentAmount, maxPaddingWidth, and prettyPrint are primitives so object.clone() will handle
+<span id="H1">            return clone;</span>
+        }
+    }
+
+    /**
+     * Get the document&#x27;s current output settings.
+     * @return the document&#x27;s current output settings.
+     */
+    public OutputSettings outputSettings() {
+<span id="H1">        return outputSettings;</span>
+    }
+
+    /**
+     * Set the document&#x27;s output settings.
+     * @param outputSettings new output settings.
+     * @return this document, for chaining.
+     */
+    public Document outputSettings(OutputSettings outputSettings) {
+<span id="H2">        Validate.notNull(outputSettings);</span>
+<span id="H2">        this.outputSettings = outputSettings;</span>
+<span id="H2">        return this;</span>
+    }
+
+<span id="H1">    public enum QuirksMode {</span>
+<span id="H1">        noQuirks, quirks, limitedQuirks</span>
+    }
+
+    public QuirksMode quirksMode() {
+<span id="H2">        return quirksMode;</span>
+    }
+
+    public Document quirksMode(QuirksMode quirksMode) {
+<span id="H2">        this.quirksMode = quirksMode;</span>
+<span id="H2">        return this;</span>
+    }
+
+    /**
+     * Get the parser that was used to parse this document.
+     * @return the parser
+     */
+    public Parser parser() {
+<span id="H1">        return parser;</span>
+    }
+
+    /**
+     * Set the parser used to create this document. This parser is then used when further parsing within this document
+     * is required.
+     * @param parser the configured parser to use when further parsing is required for this document.
+     * @return this document, for chaining.
+     */
+    public Document parser(Parser parser) {
+<span id="H1">        this.parser = parser;</span>
+<span id="H1">        return this;</span>
+    }
+
+    /**
+     Set the Connection used to fetch this document. This Connection is used as a session object when further requests are
+     made (e.g. when a form is submitted).
+
+     @param connection to set
+     @return this document, for chaining
+     @see Connection#newRequest()
+     @since 1.14.1
+     */
+    public Document connection(Connection connection) {
+<span id="H2">        Validate.notNull(connection);</span>
+<span id="H2">        this.connection = connection;</span>
+<span id="H2">        return this;</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

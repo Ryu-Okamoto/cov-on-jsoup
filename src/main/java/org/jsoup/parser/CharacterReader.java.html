@@ -1,0 +1,782 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/parser/CharacterReader.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">parser</a>/CharacterReader.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.parser;
+
+import org.jsoup.UncheckedIOException;
+import org.jsoup.helper.Validate;
+import org.jspecify.annotations.Nullable;
+
+import java.io.IOException;
+import java.io.Reader;
+import java.io.StringReader;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Locale;
+
+/**
+ CharacterReader consumes tokens off a string. Used internally by jsoup. API subject to changes.
+ */
+public final class CharacterReader {
+    static final char EOF = (char) -1;
+    private static final int maxStringCacheLen = 12;
+    static final int maxBufferLen = 1024 * 32; // visible for testing
+    static final int readAheadLimit = (int) (maxBufferLen * 0.75); // visible for testing
+    private static final int minReadAheadLen = 1024; // the minimum mark length supported. No HTML entities can be larger than this.
+
+    private char[] charBuf;
+    private Reader reader;
+    private int bufLength;
+    private int bufSplitPoint;
+    private int bufPos;
+    private int readerPos;
+<span id="H0">    private int bufMark = -1;</span>
+    private static final int stringCacheSize = 512;
+<span id="H0">    private String[] stringCache = new String[stringCacheSize]; // holds reused strings in this doc, to lessen garbage</span>
+
+<span id="H0">    @Nullable private ArrayList&lt;Integer&gt; newlinePositions = null; // optionally track the pos() position of newlines - scans during bufferUp()</span>
+<span id="H0">    private int lineNumberOffset = 1; // line numbers start at 1; += newlinePosition[indexof(pos)]</span>
+
+<span id="H0">    public CharacterReader(Reader input, int sz) {</span>
+<span id="H0">        Validate.notNull(input);</span>
+<span id="H0">        Validate.isTrue(input.markSupported());</span>
+<span id="H0">        reader = input;</span>
+<span id="H0">        charBuf = new char[Math.min(sz, maxBufferLen)];</span>
+<span id="H0">        bufferUp();</span>
+<span id="H0">    }</span>
+
+    public CharacterReader(Reader input) {
+<span id="H0">        this(input, maxBufferLen);</span>
+<span id="H0">    }</span>
+
+    public CharacterReader(String input) {
+<span id="H0">        this(new StringReader(input), input.length());</span>
+<span id="H0">    }</span>
+
+    public void close() {
+<span id="H0">        if (reader == null)</span>
+            return;
+        try {
+<span id="H0">            reader.close();</span>
+        } catch (IOException ignored) {
+        } finally {
+<span id="H0">            reader = null;</span>
+<span id="H0">            charBuf = null;</span>
+<span id="H0">            stringCache = null;</span>
+        }
+<span id="H0">    }</span>
+
+    private boolean readFully; // if the underlying stream has been completely read, no value in further buffering
+    private void bufferUp() {
+<span id="H0">        if (readFully || bufPos &lt; bufSplitPoint)</span>
+<span id="H0">            return;</span>
+
+        final int pos;
+        final int offset;
+<span id="H0">        if (bufMark != -1) {</span>
+<span id="H2">            pos = bufMark;</span>
+<span id="H2">            offset = bufPos - bufMark;</span>
+        } else {
+<span id="H0">            pos = bufPos;</span>
+<span id="H0">            offset = 0;</span>
+        }
+
+        try {
+<span id="H0">            final long skipped = reader.skip(pos);</span>
+<span id="H0">            reader.mark(maxBufferLen);</span>
+<span id="H0">            int read = 0;</span>
+<span id="H0">            while (read &lt;= minReadAheadLen) {</span>
+<span id="H0">                int thisRead = reader.read(charBuf, read, charBuf.length - read);</span>
+<span id="H0">                if (thisRead == -1)</span>
+<span id="H0">                    readFully = true;</span>
+<span id="H0">                if (thisRead &lt;= 0)</span>
+<span id="H0">                    break;</span>
+<span id="H0">                read += thisRead;</span>
+<span id="H0">            }</span>
+<span id="H0">            reader.reset();</span>
+<span id="H0">            if (read &gt; 0) {</span>
+<span id="H0">                Validate.isTrue(skipped == pos); // Previously asserted that there is room in buf to skip, so this will be a WTF</span>
+<span id="H0">                bufLength = read;</span>
+<span id="H0">                readerPos += pos;</span>
+<span id="H0">                bufPos = offset;</span>
+<span id="H0">                if (bufMark != -1)</span>
+<span id="H2">                    bufMark = 0;</span>
+<span id="H0">                bufSplitPoint = Math.min(bufLength, readAheadLimit);</span>
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+<span id="H0">        }</span>
+<span id="H0">        scanBufferForNewlines(); // if enabled, we index newline positions for line number tracking</span>
+<span id="H0">        lastIcSeq = null; // cache for last containsIgnoreCase(seq)</span>
+<span id="H0">    }</span>
+
+    /**
+     * Gets the position currently read to in the content. Starts at 0.
+     * @return current position
+     */
+    public int pos() {
+<span id="H0">        return readerPos + bufPos;</span>
+    }
+
+    /** Tests if the buffer has been fully read. */
+    boolean readFully() {
+<span id="H1">        return readFully;</span>
+    }
+
+    /**
+     Enables or disables line number tracking. By default, will be &lt;b&gt;off&lt;/b&gt;.Tracking line numbers improves the
+     legibility of parser error messages, for example. Tracking should be enabled before any content is read to be of
+     use.
+
+     @param track set tracking on|off
+     @since 1.14.3
+     */
+    public void trackNewlines(boolean track) {
+<span id="H0">        if (track &amp;&amp; newlinePositions == null) {</span>
+<span id="H0">            newlinePositions = new ArrayList&lt;&gt;(maxBufferLen / 80); // rough guess of likely count</span>
+<span id="H0">            scanBufferForNewlines(); // first pass when enabled; subsequently called during bufferUp</span>
+        }
+<span id="H0">        else if (!track)</span>
+<span id="H0">            newlinePositions = null;</span>
+<span id="H0">    }</span>
+
+    /**
+     Check if the tracking of newlines is enabled.
+     @return the current newline tracking state
+     @since 1.14.3
+     */
+    public boolean isTrackNewlines() {
+<span id="H0">        return newlinePositions != null;</span>
+    }
+
+    /**
+     Get the current line number (that the reader has consumed to). Starts at line #1.
+     @return the current line number, or 1 if line tracking is not enabled.
+     @since 1.14.3
+     @see #trackNewlines(boolean)
+     */
+    public int lineNumber() {
+<span id="H0">        return lineNumber(pos());</span>
+    }
+
+    int lineNumber(int pos) {
+        // note that this impl needs to be called before the next buffer up or line numberoffset will be wrong. if that
+        // causes issues, can remove the reset of newlinepositions during buffer, at the cost of a larger tracking array
+<span id="H0">        if (!isTrackNewlines())</span>
+<span id="H2">            return 1;</span>
+
+<span id="H0">        int i = lineNumIndex(pos);</span>
+<span id="H0">        if (i == -1)</span>
+<span id="H0">            return lineNumberOffset; // first line</span>
+<span id="H0">        return i + lineNumberOffset + 1;</span>
+    }
+
+    /**
+     Get the current column number (that the reader has consumed to). Starts at column #1.
+     @return the current column number
+     @since 1.14.3
+     @see #trackNewlines(boolean)
+     */
+    public int columnNumber() {
+<span id="H0">        return columnNumber(pos());</span>
+    }
+
+    int columnNumber(int pos) {
+<span id="H0">        if (!isTrackNewlines())</span>
+<span id="H2">            return pos + 1;</span>
+
+<span id="H0">        int i = lineNumIndex(pos);</span>
+<span id="H0">        if (i == -1)</span>
+<span id="H0">          return pos + 1;</span>
+<span id="H0">        return pos - newlinePositions.get(i) + 1;</span>
+    }
+
+    /**
+     Get a formatted string representing the current line and column positions. E.g. &lt;code&gt;5:10&lt;/code&gt; indicating line
+     number 5 and column number 10.
+     @return line:col position
+     @since 1.14.3
+     @see #trackNewlines(boolean)
+     */
+    String posLineCol() {
+<span id="H0">        return lineNumber() + &quot;:&quot; + columnNumber();</span>
+    }
+
+    private int lineNumIndex(int pos) {
+<span id="H0">        if (!isTrackNewlines()) return 0;</span>
+<span id="H0">        int i = Collections.binarySearch(newlinePositions, pos);</span>
+<span id="H0">        if (i &lt; -1) i = Math.abs(i) - 2;</span>
+<span id="H0">        return i;</span>
+    }
+
+    /**
+     Scans the buffer for newline position, and tracks their location in newlinePositions.
+     */
+    private void scanBufferForNewlines() {
+<span id="H0">        if (!isTrackNewlines())</span>
+<span id="H0">            return;</span>
+
+<span id="H0">        if (newlinePositions.size() &gt; 0) {</span>
+            // work out the line number that we have read up to (as we have likely scanned past this point)
+<span id="H0">            int index = lineNumIndex(readerPos);</span>
+<span id="H0">            if (index == -1) index = 0; // first line</span>
+<span id="H0">            int linePos = newlinePositions.get(index);</span>
+<span id="H0">            lineNumberOffset += index; // the num lines we&#x27;ve read up to</span>
+<span id="H0">            newlinePositions.clear();</span>
+<span id="H0">            newlinePositions.add(linePos); // roll the last read pos to first, for cursor num after buffer</span>
+        }
+
+<span id="H0">        for (int i = bufPos; i &lt; bufLength; i++) {</span>
+<span id="H0">            if (charBuf[i] == &#x27;\n&#x27;)</span>
+<span id="H0">                newlinePositions.add(1 + readerPos + i);</span>
+        }
+<span id="H0">    }</span>
+
+    /**
+     * Tests if all the content has been read.
+     * @return true if nothing left to read.
+     */
+    public boolean isEmpty() {
+<span id="H0">        bufferUp();</span>
+<span id="H0">        return bufPos &gt;= bufLength;</span>
+    }
+
+    private boolean isEmptyNoBufferUp() {
+<span id="H0">        return bufPos &gt;= bufLength;</span>
+    }
+
+    /**
+     * Get the char at the current position.
+     * @return char
+     */
+    public char current() {
+<span id="H0">        bufferUp();</span>
+<span id="H0">        return isEmptyNoBufferUp() ? EOF : charBuf[bufPos];</span>
+    }
+
+    char consume() {
+<span id="H0">        bufferUp();</span>
+<span id="H0">        char val = isEmptyNoBufferUp() ? EOF : charBuf[bufPos];</span>
+<span id="H0">        bufPos++;</span>
+<span id="H0">        return val;</span>
+    }
+
+    /**
+     Unconsume one character (bufPos--). MUST only be called directly after a consume(), and no chance of a bufferUp.
+     */
+    void unconsume() {
+<span id="H0">        if (bufPos &lt; 1)</span>
+<span id="H0">            throw new UncheckedIOException(new IOException(&quot;WTF: No buffer left to unconsume.&quot;)); // a bug if this fires, need to trace it.</span>
+
+<span id="H0">        bufPos--;</span>
+<span id="H0">    }</span>
+
+    /**
+     * Moves the current position by one.
+     */
+    public void advance() {
+<span id="H0">        bufPos++;</span>
+<span id="H0">    }</span>
+
+    void mark() {
+        // make sure there is enough look ahead capacity
+<span id="H0">        if (bufLength - bufPos &lt; minReadAheadLen)</span>
+<span id="H0">            bufSplitPoint = 0;</span>
+
+<span id="H0">        bufferUp();</span>
+<span id="H0">        bufMark = bufPos;</span>
+<span id="H0">    }</span>
+
+    void unmark() {
+<span id="H0">        bufMark = -1;</span>
+<span id="H0">    }</span>
+
+    void rewindToMark() {
+<span id="H0">        if (bufMark == -1)</span>
+<span id="H0">            throw new UncheckedIOException(new IOException(&quot;Mark invalid&quot;));</span>
+
+<span id="H0">        bufPos = bufMark;</span>
+<span id="H0">        unmark();</span>
+<span id="H0">    }</span>
+
+    /**
+     * Returns the number of characters between the current position and the next instance of the input char
+     * @param c scan target
+     * @return offset between current position and next instance of target. -1 if not found.
+     */
+    int nextIndexOf(char c) {
+        // doesn&#x27;t handle scanning for surrogates
+<span id="H0">        bufferUp();</span>
+<span id="H0">        for (int i = bufPos; i &lt; bufLength; i++) {</span>
+<span id="H0">            if (c == charBuf[i])</span>
+<span id="H0">                return i - bufPos;</span>
+        }
+<span id="H0">        return -1;</span>
+    }
+
+    /**
+     * Returns the number of characters between the current position and the next instance of the input sequence
+     *
+     * @param seq scan target
+     * @return offset between current position and next instance of target. -1 if not found.
+     */
+    int nextIndexOf(CharSequence seq) {
+<span id="H0">        bufferUp();</span>
+        // doesn&#x27;t handle scanning for surrogates
+<span id="H0">        char startChar = seq.charAt(0);</span>
+<span id="H0">        for (int offset = bufPos; offset &lt; bufLength; offset++) {</span>
+            // scan to first instance of startchar:
+<span id="H0">            if (startChar != charBuf[offset])</span>
+<span id="H0">                while(++offset &lt; bufLength &amp;&amp; startChar != charBuf[offset]) { /* empty */ }</span>
+<span id="H0">            int i = offset + 1;</span>
+<span id="H0">            int last = i + seq.length()-1;</span>
+<span id="H0">            if (offset &lt; bufLength &amp;&amp; last &lt;= bufLength) {</span>
+<span id="H0">                for (int j = 1; i &lt; last &amp;&amp; seq.charAt(j) == charBuf[i]; i++, j++) { /* empty */ }</span>
+<span id="H0">                if (i == last) // found full sequence</span>
+<span id="H0">                    return offset - bufPos;</span>
+            }
+        }
+<span id="H0">        return -1;</span>
+    }
+
+    /**
+     * Reads characters up to the specific char.
+     * @param c the delimiter
+     * @return the chars read
+     */
+    public String consumeTo(char c) {
+<span id="H0">        int offset = nextIndexOf(c);</span>
+<span id="H0">        if (offset != -1) {</span>
+<span id="H0">            String consumed = cacheString(charBuf, stringCache, bufPos, offset);</span>
+<span id="H0">            bufPos += offset;</span>
+<span id="H0">            return consumed;</span>
+        } else {
+<span id="H0">            return consumeToEnd();</span>
+        }
+    }
+
+    String consumeTo(String seq) {
+<span id="H0">        int offset = nextIndexOf(seq);</span>
+<span id="H0">        if (offset != -1) {</span>
+<span id="H0">            String consumed = cacheString(charBuf, stringCache, bufPos, offset);</span>
+<span id="H0">            bufPos += offset;</span>
+<span id="H0">            return consumed;</span>
+<span id="H0">        } else if (bufLength - bufPos &lt; seq.length()) {</span>
+            // nextIndexOf() did a bufferUp(), so if the buffer is shorter than the search string, we must be at EOF
+<span id="H1">            return consumeToEnd();</span>
+        } else {
+            // the string we&#x27;re looking for may be straddling a buffer boundary, so keep (length - 1) characters
+            // unread in case they contain the beginning of the search string
+<span id="H0">            int endPos = bufLength - seq.length() + 1;</span>
+<span id="H0">            String consumed = cacheString(charBuf, stringCache, bufPos, endPos - bufPos);</span>
+<span id="H0">            bufPos = endPos;</span>
+<span id="H0">            return consumed;</span>
+        }
+    }
+
+    /**
+     * Read characters until the first of any delimiters is found.
+     * @param chars delimiters to scan for
+     * @return characters read up to the matched delimiter.
+     */
+    public String consumeToAny(final char... chars) {
+<span id="H0">        bufferUp();</span>
+<span id="H0">        int pos = bufPos;</span>
+<span id="H0">        final int start = pos;</span>
+<span id="H0">        final int remaining = bufLength;</span>
+<span id="H0">        final char[] val = charBuf;</span>
+<span id="H0">        final int charLen = chars.length;</span>
+        int i;
+
+<span id="H0">        OUTER: while (pos &lt; remaining) {</span>
+<span id="H0">            for (i = 0; i &lt; charLen; i++) {</span>
+<span id="H0">                if (val[pos] == chars[i])</span>
+<span id="H0">                    break OUTER;</span>
+            }
+<span id="H0">            pos++;</span>
+        }
+
+<span id="H0">        bufPos = pos;</span>
+<span id="H0">        return pos &gt; start ? cacheString(charBuf, stringCache, start, pos -start) : &quot;&quot;;</span>
+    }
+
+    String consumeToAnySorted(final char... chars) {
+<span id="H1">        bufferUp();</span>
+<span id="H1">        int pos = bufPos;</span>
+<span id="H1">        final int start = pos;</span>
+<span id="H1">        final int remaining = bufLength;</span>
+<span id="H1">        final char[] val = charBuf;</span>
+
+<span id="H1">        while (pos &lt; remaining) {</span>
+<span id="H1">            if (Arrays.binarySearch(chars, val[pos]) &gt;= 0)</span>
+<span id="H1">                break;</span>
+<span id="H1">            pos++;</span>
+        }
+<span id="H1">        bufPos = pos;</span>
+<span id="H1">        return bufPos &gt; start ? cacheString(charBuf, stringCache, start, pos -start) : &quot;&quot;;</span>
+    }
+
+    String consumeData() {
+        // &amp;, &lt;, null
+        //bufferUp(); // no need to bufferUp, just called consume()
+<span id="H1">        int pos = bufPos;</span>
+<span id="H1">        final int start = pos;</span>
+<span id="H1">        final int remaining = bufLength;</span>
+<span id="H1">        final char[] val = charBuf;</span>
+
+<span id="H1">        OUTER: while (pos &lt; remaining) {</span>
+<span id="H1">            switch (val[pos]) {</span>
+                case &#x27;&amp;&#x27;:
+                case &#x27;&lt;&#x27;:
+                case TokeniserState.nullChar:
+<span id="H1">                    break OUTER;</span>
+                default:
+<span id="H1">                    pos++;</span>
+            }
+        }
+<span id="H1">        bufPos = pos;</span>
+<span id="H1">        return pos &gt; start ? cacheString(charBuf, stringCache, start, pos -start) : &quot;&quot;;</span>
+    }
+
+    String consumeAttributeQuoted(final boolean single) {
+        // null, &quot; or &#x27;, &amp;
+        //bufferUp(); // no need to bufferUp, just called consume()
+<span id="H0">        int pos = bufPos;</span>
+<span id="H0">        final int start = pos;</span>
+<span id="H0">        final int remaining = bufLength;</span>
+<span id="H0">        final char[] val = charBuf;</span>
+
+<span id="H0">        OUTER: while (pos &lt; remaining) {</span>
+<span id="H0">            switch (val[pos]) {</span>
+                case &#x27;&amp;&#x27;:
+                case TokeniserState.nullChar:
+<span id="H0">                    break OUTER;</span>
+                case &#x27;\&#x27;&#x27;:
+<span id="H0">                    if (single) break OUTER;</span>
+                    break;
+                case &#x27;&quot;&#x27;:
+<span id="H0">                    if (!single) break OUTER;</span>
+                    break;
+            }
+<span id="H0">            pos++;</span>
+        }
+<span id="H0">        bufPos = pos;</span>
+<span id="H0">        return pos &gt; start ? cacheString(charBuf, stringCache, start, pos -start) : &quot;&quot;;</span>
+    }
+
+
+    String consumeRawData() {
+        // &lt;, null
+        //bufferUp(); // no need to bufferUp, just called consume()
+<span id="H2">        int pos = bufPos;</span>
+<span id="H2">        final int start = pos;</span>
+<span id="H2">        final int remaining = bufLength;</span>
+<span id="H2">        final char[] val = charBuf;</span>
+
+<span id="H2">        OUTER: while (pos &lt; remaining) {</span>
+<span id="H2">            switch (val[pos]) {</span>
+                case &#x27;&lt;&#x27;:
+                case TokeniserState.nullChar:
+<span id="H2">                    break OUTER;</span>
+                default:
+<span id="H2">                    pos++;</span>
+            }
+        }
+<span id="H2">        bufPos = pos;</span>
+<span id="H2">        return pos &gt; start ? cacheString(charBuf, stringCache, start, pos -start) : &quot;&quot;;</span>
+    }
+
+    String consumeTagName() {
+        // &#x27;\t&#x27;, &#x27;\n&#x27;, &#x27;\r&#x27;, &#x27;\f&#x27;, &#x27; &#x27;, &#x27;/&#x27;, &#x27;&gt;&#x27;
+        // NOTE: out of spec, added &#x27;&lt;&#x27; to fix common author bugs; does not stop and append on nullChar but eats
+<span id="H1">        bufferUp();</span>
+<span id="H1">        int pos = bufPos;</span>
+<span id="H1">        final int start = pos;</span>
+<span id="H1">        final int remaining = bufLength;</span>
+<span id="H1">        final char[] val = charBuf;</span>
+
+<span id="H1">        OUTER: while (pos &lt; remaining) {</span>
+<span id="H1">            switch (val[pos]) {</span>
+                case &#x27;\t&#x27;:
+                case &#x27;\n&#x27;:
+                case &#x27;\r&#x27;:
+                case &#x27;\f&#x27;:
+                case &#x27; &#x27;:
+                case &#x27;/&#x27;:
+                case &#x27;&gt;&#x27;:
+                case &#x27;&lt;&#x27;:
+<span id="H1">                    break OUTER;</span>
+            }
+<span id="H1">            pos++;</span>
+        }
+
+<span id="H1">        bufPos = pos;</span>
+<span id="H1">        return pos &gt; start ? cacheString(charBuf, stringCache, start, pos -start) : &quot;&quot;;</span>
+    }
+
+    String consumeToEnd() {
+<span id="H0">        bufferUp();</span>
+<span id="H0">        String data = cacheString(charBuf, stringCache, bufPos, bufLength - bufPos);</span>
+<span id="H0">        bufPos = bufLength;</span>
+<span id="H0">        return data;</span>
+    }
+
+    String consumeLetterSequence() {
+<span id="H0">        bufferUp();</span>
+<span id="H0">        int start = bufPos;</span>
+<span id="H0">        while (bufPos &lt; bufLength) {</span>
+<span id="H0">            char c = charBuf[bufPos];</span>
+<span id="H0">            if ((c &gt;= &#x27;A&#x27; &amp;&amp; c &lt;= &#x27;Z&#x27;) || (c &gt;= &#x27;a&#x27; &amp;&amp; c &lt;= &#x27;z&#x27;) || Character.isLetter(c))</span>
+<span id="H0">                bufPos++;</span>
+            else
+                break;
+<span id="H0">        }</span>
+
+<span id="H0">        return cacheString(charBuf, stringCache, start, bufPos - start);</span>
+    }
+
+    String consumeLetterThenDigitSequence() {
+<span id="H0">        bufferUp();</span>
+<span id="H0">        int start = bufPos;</span>
+<span id="H0">        while (bufPos &lt; bufLength) {</span>
+<span id="H0">            char c = charBuf[bufPos];</span>
+<span id="H0">            if ((c &gt;= &#x27;A&#x27; &amp;&amp; c &lt;= &#x27;Z&#x27;) || (c &gt;= &#x27;a&#x27; &amp;&amp; c &lt;= &#x27;z&#x27;) || Character.isLetter(c))</span>
+<span id="H0">                bufPos++;</span>
+            else
+                break;
+<span id="H0">        }</span>
+<span id="H0">        while (!isEmptyNoBufferUp()) {</span>
+<span id="H0">            char c = charBuf[bufPos];</span>
+<span id="H0">            if (c &gt;= &#x27;0&#x27; &amp;&amp; c &lt;= &#x27;9&#x27;)</span>
+<span id="H0">                bufPos++;</span>
+            else
+                break;
+<span id="H0">        }</span>
+
+<span id="H0">        return cacheString(charBuf, stringCache, start, bufPos - start);</span>
+    }
+
+    String consumeHexSequence() {
+<span id="H2">        bufferUp();</span>
+<span id="H2">        int start = bufPos;</span>
+<span id="H2">        while (bufPos &lt; bufLength) {</span>
+<span id="H2">            char c = charBuf[bufPos];</span>
+<span id="H2">            if ((c &gt;= &#x27;0&#x27; &amp;&amp; c &lt;= &#x27;9&#x27;) || (c &gt;= &#x27;A&#x27; &amp;&amp; c &lt;= &#x27;F&#x27;) || (c &gt;= &#x27;a&#x27; &amp;&amp; c &lt;= &#x27;f&#x27;))</span>
+<span id="H2">                bufPos++;</span>
+            else
+                break;
+<span id="H2">        }</span>
+<span id="H2">        return cacheString(charBuf, stringCache, start, bufPos - start);</span>
+    }
+
+    String consumeDigitSequence() {
+<span id="H1">        bufferUp();</span>
+<span id="H1">        int start = bufPos;</span>
+<span id="H1">        while (bufPos &lt; bufLength) {</span>
+<span id="H1">            char c = charBuf[bufPos];</span>
+<span id="H1">            if (c &gt;= &#x27;0&#x27; &amp;&amp; c &lt;= &#x27;9&#x27;)</span>
+<span id="H1">                bufPos++;</span>
+            else
+                break;
+<span id="H1">        }</span>
+<span id="H1">        return cacheString(charBuf, stringCache, start, bufPos - start);</span>
+    }
+
+    boolean matches(char c) {
+<span id="H0">        return !isEmpty() &amp;&amp; charBuf[bufPos] == c;</span>
+
+    }
+
+    boolean matches(String seq) {
+<span id="H0">        bufferUp();</span>
+<span id="H0">        int scanLength = seq.length();</span>
+<span id="H0">        if (scanLength &gt; bufLength - bufPos)</span>
+<span id="H0">            return false;</span>
+
+<span id="H0">        for (int offset = 0; offset &lt; scanLength; offset++)</span>
+<span id="H0">            if (seq.charAt(offset) != charBuf[bufPos +offset])</span>
+<span id="H0">                return false;</span>
+<span id="H0">        return true;</span>
+    }
+
+    boolean matchesIgnoreCase(String seq) {
+<span id="H0">        bufferUp();</span>
+<span id="H0">        int scanLength = seq.length();</span>
+<span id="H0">        if (scanLength &gt; bufLength - bufPos)</span>
+<span id="H0">            return false;</span>
+
+<span id="H0">        for (int offset = 0; offset &lt; scanLength; offset++) {</span>
+<span id="H0">            char upScan = Character.toUpperCase(seq.charAt(offset));</span>
+<span id="H0">            char upTarget = Character.toUpperCase(charBuf[bufPos + offset]);</span>
+<span id="H0">            if (upScan != upTarget)</span>
+<span id="H0">                return false;</span>
+        }
+<span id="H0">        return true;</span>
+    }
+
+    boolean matchesAny(char... seq) {
+<span id="H0">        if (isEmpty())</span>
+<span id="H0">            return false;</span>
+
+<span id="H0">        bufferUp();</span>
+<span id="H0">        char c = charBuf[bufPos];</span>
+<span id="H0">        for (char seek : seq) {</span>
+<span id="H0">            if (seek == c)</span>
+<span id="H0">                return true;</span>
+        }
+<span id="H0">        return false;</span>
+    }
+
+    boolean matchesAnySorted(char[] seq) {
+<span id="H1">        bufferUp();</span>
+<span id="H1">        return !isEmpty() &amp;&amp; Arrays.binarySearch(seq, charBuf[bufPos]) &gt;= 0;</span>
+    }
+
+    boolean matchesLetter() {
+<span id="H1">        if (isEmpty())</span>
+<span id="H2">            return false;</span>
+<span id="H1">        char c = charBuf[bufPos];</span>
+<span id="H1">        return (c &gt;= &#x27;A&#x27; &amp;&amp; c &lt;= &#x27;Z&#x27;) || (c &gt;= &#x27;a&#x27; &amp;&amp; c &lt;= &#x27;z&#x27;) || Character.isLetter(c);</span>
+    }
+
+    /**
+     Checks if the current pos matches an ascii alpha (A-Z a-z) per https://infra.spec.whatwg.org/#ascii-alpha
+     @return if it matches or not
+     */
+    boolean matchesAsciiAlpha() {
+<span id="H1">        if (isEmpty())</span>
+<span id="H1">            return false;</span>
+<span id="H1">        char c = charBuf[bufPos];</span>
+<span id="H1">        return (c &gt;= &#x27;A&#x27; &amp;&amp; c &lt;= &#x27;Z&#x27;) || (c &gt;= &#x27;a&#x27; &amp;&amp; c &lt;= &#x27;z&#x27;);</span>
+    }
+
+    boolean matchesDigit() {
+<span id="H0">        if (isEmpty())</span>
+<span id="H0">            return false;</span>
+<span id="H0">        char c = charBuf[bufPos];</span>
+<span id="H0">        return (c &gt;= &#x27;0&#x27; &amp;&amp; c &lt;= &#x27;9&#x27;);</span>
+    }
+
+    boolean matchConsume(String seq) {
+<span id="H0">        bufferUp();</span>
+<span id="H0">        if (matches(seq)) {</span>
+<span id="H0">            bufPos += seq.length();</span>
+<span id="H0">            return true;</span>
+        } else {
+<span id="H1">            return false;</span>
+        }
+    }
+
+    boolean matchConsumeIgnoreCase(String seq) {
+<span id="H1">        if (matchesIgnoreCase(seq)) {</span>
+<span id="H2">            bufPos += seq.length();</span>
+<span id="H2">            return true;</span>
+        } else {
+<span id="H1">            return false;</span>
+        }
+    }
+
+    // we maintain a cache of the previously scanned sequence, and return that if applicable on repeated scans.
+    // that improves the situation where there is a sequence of &lt;p&lt;p&lt;p&lt;p&lt;p&lt;p&lt;p...&lt;/title&gt; and we&#x27;re bashing on the &lt;p
+    // looking for the &lt;/title&gt;. Resets in bufferUp()
+    @Nullable private String lastIcSeq; // scan cache
+    private int lastIcIndex; // nearest found indexOf
+
+    /** Used to check presence of &lt;/title&gt;, &lt;/style&gt; when we&#x27;re in RCData and see a &lt;xxx. Only finds consistent case. */
+    boolean containsIgnoreCase(String seq) {
+<span id="H1">        if (seq.equals(lastIcSeq)) {</span>
+<span id="H2">            if (lastIcIndex == -1) return false;</span>
+<span id="H2">            if (lastIcIndex &gt;= bufPos) return true;</span>
+        }
+<span id="H1">        lastIcSeq = seq;</span>
+
+<span id="H1">        String loScan = seq.toLowerCase(Locale.ENGLISH);</span>
+<span id="H1">        int lo = nextIndexOf(loScan);</span>
+<span id="H1">        if (lo &gt; -1) {</span>
+<span id="H1">            lastIcIndex = bufPos + lo; return true;</span>
+        }
+
+<span id="H1">        String hiScan = seq.toUpperCase(Locale.ENGLISH);</span>
+<span id="H1">        int hi = nextIndexOf(hiScan);</span>
+<span id="H1">        boolean found = hi &gt; -1;</span>
+<span id="H1">        lastIcIndex = found ? bufPos + hi : -1; // we don&#x27;t care about finding the nearest, just that buf contains</span>
+<span id="H1">        return found;</span>
+    }
+
+    @Override
+    public String toString() {
+        if (bufLength - bufPos &lt; 0)
+            return &quot;&quot;;
+        return new String(charBuf, bufPos, bufLength - bufPos);
+    }
+
+    /**
+     * Caches short strings, as a flyweight pattern, to reduce GC load. Just for this doc, to prevent leaks.
+     * &lt;p /&gt;
+     * Simplistic, and on hash collisions just falls back to creating a new string, vs a full HashMap with Entry list.
+     * That saves both having to create objects as hash keys, and running through the entry list, at the expense of
+     * some more duplicates.
+     */
+    private static String cacheString(final char[] charBuf, final String[] stringCache, final int start, final int count) {
+        // limit (no cache):
+<span id="H0">        if (count &gt; maxStringCacheLen)</span>
+<span id="H0">            return new String(charBuf, start, count);</span>
+<span id="H0">        if (count &lt; 1)</span>
+<span id="H0">            return &quot;&quot;;</span>
+
+        // calculate hash:
+<span id="H0">        int hash = 0;</span>
+<span id="H0">        for (int i = 0; i &lt; count; i++) {</span>
+<span id="H0">            hash = 31 * hash + charBuf[start + i];</span>
+        }
+
+        // get from cache
+<span id="H0">        final int index = hash &amp; stringCacheSize - 1;</span>
+<span id="H0">        String cached = stringCache[index];</span>
+
+<span id="H0">        if (cached != null &amp;&amp; rangeEquals(charBuf, start, count, cached)) // positive hit</span>
+<span id="H0">            return cached;</span>
+        else {
+<span id="H0">            cached = new String(charBuf, start, count);</span>
+<span id="H0">            stringCache[index] = cached; // add or replace, assuming most recently used are most likely to recur next</span>
+        }
+
+<span id="H0">        return cached;</span>
+    }
+
+    /**
+     * Check if the value of the provided range equals the string.
+     */
+    static boolean rangeEquals(final char[] charBuf, final int start, int count, final String cached) {
+<span id="H0">        if (count == cached.length()) {</span>
+<span id="H0">            int i = start;</span>
+<span id="H0">            int j = 0;</span>
+<span id="H0">            while (count-- != 0) {</span>
+<span id="H0">                if (charBuf[i++] != cached.charAt(j++))</span>
+<span id="H0">                    return false;</span>
+            }
+<span id="H0">            return true;</span>
+        }
+<span id="H0">        return false;</span>
+    }
+
+    // just used for testing
+    boolean rangeEquals(final int start, final int count, final String cached) {
+<span id="H0">        return rangeEquals(charBuf, start, count, cached);</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

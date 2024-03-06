@@ -1,0 +1,1407 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/helper/HttpConnection.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">helper</a>/HttpConnection.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.helper;
+
+import org.jsoup.Connection;
+import org.jsoup.HttpStatusException;
+import org.jsoup.UncheckedIOException;
+import org.jsoup.UnsupportedMimeTypeException;
+import org.jsoup.internal.ControllableInputStream;
+import org.jsoup.internal.SharedConstants;
+import org.jsoup.internal.StringUtil;
+import org.jsoup.nodes.Document;
+import org.jsoup.parser.Parser;
+import org.jsoup.parser.TokenQueue;
+import org.jspecify.annotations.Nullable;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLSocketFactory;
+import java.io.BufferedInputStream;
+import java.io.BufferedWriter;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.net.CookieManager;
+import java.net.CookieStore;
+import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
+import java.net.MalformedURLException;
+import java.net.Proxy;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.Buffer;
+import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
+import java.nio.charset.IllegalCharsetNameException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.Inflater;
+import java.util.zip.InflaterInputStream;
+
+import static org.jsoup.Connection.Method.HEAD;
+import static org.jsoup.helper.DataUtil.UTF_8;
+import static org.jsoup.internal.Normalizer.lowerCase;
+
+/**
+ * Implementation of {@link Connection}.
+ * @see org.jsoup.Jsoup#connect(String)
+ */
+@SuppressWarnings(&quot;CharsetObjectCanBeUsed&quot;)
+public class HttpConnection implements Connection {
+    public static final String CONTENT_ENCODING = &quot;Content-Encoding&quot;;
+    /**
+     * Many users would get caught by not setting a user-agent and therefore getting different responses on their desktop
+     * vs in jsoup, which would otherwise default to {@code Java}. So by default, use a desktop UA.
+     */
+    public static final String DEFAULT_UA =
+        &quot;Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36&quot;;
+    private static final String USER_AGENT = &quot;User-Agent&quot;;
+    public static final String CONTENT_TYPE = &quot;Content-Type&quot;;
+    public static final String MULTIPART_FORM_DATA = &quot;multipart/form-data&quot;;
+    public static final String FORM_URL_ENCODED = &quot;application/x-www-form-urlencoded&quot;;
+    private static final int HTTP_TEMP_REDIR = 307; // http/1.1 temporary redirect, not in Java&#x27;s set.
+    private static final String DefaultUploadType = &quot;application/octet-stream&quot;;
+<span id="H2">    private static final Charset ISO_8859_1 = Charset.forName(&quot;ISO-8859-1&quot;);</span>
+
+    /**
+     Create a new Connection, with the request URL specified.
+     @param url the URL to fetch from
+     @return a new Connection object
+     */
+    public static Connection connect(String url) {
+<span id="H2">        Connection con = new HttpConnection();</span>
+<span id="H2">        con.url(url);</span>
+<span id="H2">        return con;</span>
+    }
+
+    /**
+     Create a new Connection, with the request URL specified.
+     @param url the URL to fetch from
+     @return a new Connection object
+     */
+    public static Connection connect(URL url) {
+<span id="H2">        Connection con = new HttpConnection();</span>
+<span id="H2">        con.url(url);</span>
+<span id="H2">        return con;</span>
+    }
+
+    /**
+     Create a new, empty HttpConnection.
+     */
+<span id="H2">    public HttpConnection() {</span>
+<span id="H2">        req = new Request();</span>
+<span id="H2">    }</span>
+
+    /**
+     Create a new Request by deep-copying an existing Request. Note that the data and body of the original are not
+     copied. All other settings (proxy, parser, cookies, etc) are copied.
+     @param copy the request to copy
+     */
+<span id="H2">    HttpConnection(Request copy) {</span>
+<span id="H2">        req = new Request(copy);</span>
+<span id="H2">    }</span>
+
+    private static String encodeMimeName(String val) {
+<span id="H2">        return val.replace(&quot;\&quot;&quot;, &quot;%22&quot;);</span>
+    }
+
+    private HttpConnection.Request req;
+    private Connection.@Nullable Response res;
+
+    @Override
+    public Connection newRequest() {
+        // copy the prototype request for the different settings, cookie manager, etc
+<span id="H2">        return new HttpConnection(req);</span>
+    }
+
+    /** Create a new Connection that just wraps the provided Request and Response */
+<span id="H2">    private HttpConnection(Request req, Response res) {</span>
+<span id="H2">        this.req = req;</span>
+<span id="H2">        this.res = res;</span>
+<span id="H2">    }</span>
+
+    @Override
+    public Connection url(URL url) {
+<span id="H2">        req.url(url);</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection url(String url) {
+<span id="H2">        Validate.notEmptyParam(url, &quot;url&quot;);</span>
+        try {
+<span id="H2">            req.url(new URL(url));</span>
+<span id="H2">        } catch (MalformedURLException e) {</span>
+<span id="H2">            throw new IllegalArgumentException(String.format(&quot;The supplied URL, &#x27;%s&#x27;, is malformed. Make sure it is an absolute URL, and starts with &#x27;http://&#x27; or &#x27;https://&#x27;. See https://jsoup.org/cookbook/extracting-data/working-with-urls&quot;, url), e);</span>
+<span id="H2">        }</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection proxy(@Nullable Proxy proxy) {
+        req.proxy(proxy);
+        return this;
+    }
+
+    @Override
+    public Connection proxy(String host, int port) {
+<span id="H2">        req.proxy(host, port);</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection userAgent(String userAgent) {
+<span id="H2">        Validate.notNullParam(userAgent, &quot;userAgent&quot;);</span>
+<span id="H2">        req.header(USER_AGENT, userAgent);</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection timeout(int millis) {
+<span id="H2">        req.timeout(millis);</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection maxBodySize(int bytes) {
+<span id="H2">        req.maxBodySize(bytes);</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection followRedirects(boolean followRedirects) {
+        req.followRedirects(followRedirects);
+        return this;
+    }
+
+    @Override
+    public Connection referrer(String referrer) {
+<span id="H2">        Validate.notNullParam(referrer, &quot;referrer&quot;);</span>
+<span id="H2">        req.header(&quot;Referer&quot;, referrer);</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection method(Method method) {
+<span id="H2">        req.method(method);</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection ignoreHttpErrors(boolean ignoreHttpErrors) {
+<span id="H2">		req.ignoreHttpErrors(ignoreHttpErrors);</span>
+<span id="H2">		return this;</span>
+	}
+
+    @Override
+    public Connection ignoreContentType(boolean ignoreContentType) {
+<span id="H2">        req.ignoreContentType(ignoreContentType);</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection data(String key, String value) {
+<span id="H2">        req.data(KeyVal.create(key, value));</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection sslSocketFactory(SSLSocketFactory sslSocketFactory) {
+	    req.sslSocketFactory(sslSocketFactory);
+	    return this;
+    }
+
+    @Override
+    public Connection data(String key, String filename, InputStream inputStream) {
+        req.data(KeyVal.create(key, filename, inputStream));
+        return this;
+    }
+
+    @Override
+    public Connection data(String key, String filename, InputStream inputStream, String contentType) {
+        req.data(KeyVal.create(key, filename, inputStream).contentType(contentType));
+        return this;
+    }
+
+    @Override
+    public Connection data(Map&lt;String, String&gt; data) {
+        Validate.notNullParam(data, &quot;data&quot;);
+        for (Map.Entry&lt;String, String&gt; entry : data.entrySet()) {
+            req.data(KeyVal.create(entry.getKey(), entry.getValue()));
+        }
+        return this;
+    }
+
+    @Override
+    public Connection data(String... keyvals) {
+<span id="H2">        Validate.notNullParam(keyvals, &quot;keyvals&quot;);</span>
+<span id="H2">        Validate.isTrue(keyvals.length %2 == 0, &quot;Must supply an even number of key value pairs&quot;);</span>
+<span id="H2">        for (int i = 0; i &lt; keyvals.length; i += 2) {</span>
+<span id="H2">            String key = keyvals[i];</span>
+<span id="H2">            String value = keyvals[i+1];</span>
+<span id="H2">            Validate.notEmpty(key, &quot;Data key must not be empty&quot;);</span>
+<span id="H2">            Validate.notNull(value, &quot;Data value must not be null&quot;);</span>
+<span id="H2">            req.data(KeyVal.create(key, value));</span>
+        }
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection data(Collection&lt;Connection.KeyVal&gt; data) {
+<span id="H2">        Validate.notNullParam(data, &quot;data&quot;);</span>
+<span id="H2">        for (Connection.KeyVal entry: data) {</span>
+<span id="H2">            req.data(entry);</span>
+<span id="H2">        }</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection.KeyVal data(String key) {
+<span id="H3">        Validate.notEmptyParam(key, &quot;key&quot;);</span>
+<span id="H3">        for (Connection.KeyVal keyVal : request().data()) {</span>
+<span id="H3">            if (keyVal.key().equals(key))</span>
+<span id="H3">                return keyVal;</span>
+<span id="H3">        }</span>
+        return null;
+    }
+
+    @Override
+    public Connection requestBody(String body) {
+<span id="H2">        req.requestBody(body);</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection header(String name, String value) {
+<span id="H2">        req.header(name, value);</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection headers(Map&lt;String,String&gt; headers) {
+<span id="H2">        Validate.notNullParam(headers, &quot;headers&quot;);</span>
+<span id="H2">        for (Map.Entry&lt;String,String&gt; entry : headers.entrySet()) {</span>
+<span id="H2">            req.header(entry.getKey(),entry.getValue());</span>
+<span id="H2">        }</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection cookie(String name, String value) {
+<span id="H2">        req.cookie(name, value);</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection cookies(Map&lt;String, String&gt; cookies) {
+<span id="H2">        Validate.notNullParam(cookies, &quot;cookies&quot;);</span>
+<span id="H2">        for (Map.Entry&lt;String, String&gt; entry : cookies.entrySet()) {</span>
+<span id="H2">            req.cookie(entry.getKey(), entry.getValue());</span>
+<span id="H2">        }</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Connection cookieStore(CookieStore cookieStore) {
+        // create a new cookie manager using the new store
+        req.cookieManager = new CookieManager(cookieStore, null);
+        return this;
+    }
+
+    @Override
+    public CookieStore cookieStore() {
+        return req.cookieManager.getCookieStore();
+    }
+
+    @Override
+    public Connection parser(Parser parser) {
+<span id="H2">        req.parser(parser);</span>
+<span id="H2">        return this;</span>
+    }
+
+    @Override
+    public Document get() throws IOException {
+<span id="H2">        req.method(Method.GET);</span>
+<span id="H2">        execute();</span>
+<span id="H2">        Validate.notNull(res);</span>
+<span id="H2">        return res.parse();</span>
+    }
+
+    @Override
+    public Document post() throws IOException {
+<span id="H2">        req.method(Method.POST);</span>
+<span id="H2">        execute();</span>
+<span id="H2">        Validate.notNull(res);</span>
+<span id="H2">        return res.parse();</span>
+    }
+
+    @Override
+    public Connection.Response execute() throws IOException {
+<span id="H2">        res = Response.execute(req);</span>
+<span id="H2">        return res;</span>
+    }
+
+    @Override
+    public Connection.Request request() {
+<span id="H2">        return req;</span>
+    }
+
+    @Override
+    public Connection request(Connection.Request request) {
+        req = (HttpConnection.Request) request; // will throw a class-cast exception if the user has extended some but not all of Connection; that&#x27;s desired
+        return this;
+    }
+
+    @Override
+    public Connection.Response response() {
+<span id="H2">        if (res == null) {</span>
+<span id="H2">            throw new IllegalArgumentException(&quot;You must execute the request before getting a response.&quot;);</span>
+        }
+<span id="H2">        return res;</span>
+    }
+
+    @Override
+    public Connection response(Connection.Response response) {
+        res = response;
+        return this;
+    }
+
+    @Override
+    public Connection postDataCharset(String charset) {
+        req.postDataCharset(charset);
+        return this;
+    }
+
+    @Override public Connection auth(RequestAuthenticator authenticator) {
+<span id="H2">        req.auth(authenticator);</span>
+<span id="H2">        return this;</span>
+    }
+
+    @SuppressWarnings(&quot;unchecked&quot;)
+    private static abstract class Base&lt;T extends Connection.Base&lt;T&gt;&gt; implements Connection.Base&lt;T&gt; {
+        private static final URL UnsetUrl; // only used if you created a new Request()
+        static {
+            try {
+<span id="H1">                UnsetUrl = new URL(&quot;http://undefined/&quot;);</span>
+            } catch (MalformedURLException e) {
+                throw new IllegalStateException(e);
+<span id="H1">            }</span>
+<span id="H1">        }</span>
+
+<span id="H1">        URL url = UnsetUrl;</span>
+<span id="H1">        Method method = Method.GET;</span>
+        Map&lt;String, List&lt;String&gt;&gt; headers;
+        Map&lt;String, String&gt; cookies;
+
+<span id="H1">        private Base() {</span>
+<span id="H1">            headers = new LinkedHashMap&lt;&gt;();</span>
+<span id="H1">            cookies = new LinkedHashMap&lt;&gt;();</span>
+<span id="H1">        }</span>
+
+<span id="H2">        private Base(Base&lt;T&gt; copy) {</span>
+<span id="H2">            url = copy.url; // unmodifiable object</span>
+<span id="H2">            method = copy.method;</span>
+<span id="H2">            headers = new LinkedHashMap&lt;&gt;();</span>
+<span id="H2">            for (Map.Entry&lt;String, List&lt;String&gt;&gt; entry : copy.headers.entrySet()) {</span>
+<span id="H2">                headers.put(entry.getKey(), new ArrayList&lt;&gt;(entry.getValue()));</span>
+<span id="H2">            }</span>
+<span id="H2">            cookies = new LinkedHashMap&lt;&gt;(); cookies.putAll(copy.cookies); // just holds strings</span>
+<span id="H2">        }</span>
+
+        @Override
+        public URL url() {
+<span id="H2">            if (url == UnsetUrl)</span>
+<span id="H2">                throw new IllegalArgumentException(&quot;URL not set. Make sure to call #url(...) before executing the request.&quot;);</span>
+<span id="H2">            return url;</span>
+        }
+
+        @Override
+        public T url(URL url) {
+<span id="H2">            Validate.notNullParam(url, &quot;url&quot;);</span>
+<span id="H2">            this.url = new UrlBuilder(url).build();</span>
+<span id="H2">            return (T) this;</span>
+        }
+
+        @Override
+        public Method method() {
+<span id="H2">            return method;</span>
+        }
+
+        @Override
+        public T method(Method method) {
+<span id="H2">            Validate.notNullParam(method, &quot;method&quot;);</span>
+<span id="H2">            this.method = method;</span>
+<span id="H2">            return (T) this;</span>
+        }
+
+        @Override
+        public String header(String name) {
+<span id="H2">            Validate.notNullParam(name, &quot;name&quot;);</span>
+<span id="H2">            List&lt;String&gt; vals = getHeadersCaseInsensitive(name);</span>
+<span id="H2">            if (vals.size() &gt; 0) {</span>
+                // https://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.2
+<span id="H2">                return StringUtil.join(vals, &quot;, &quot;);</span>
+            }
+
+<span id="H2">            return null;</span>
+        }
+
+        @Override
+        public T addHeader(String name, @Nullable String value) {
+<span id="H1">            Validate.notEmptyParam(name, &quot;name&quot;);</span>
+            //noinspection ConstantConditions
+<span id="H1">            value = value == null ? &quot;&quot; : value;</span>
+
+<span id="H1">            List&lt;String&gt; values = headers(name);</span>
+<span id="H1">            if (values.isEmpty()) {</span>
+<span id="H1">                values = new ArrayList&lt;&gt;();</span>
+<span id="H1">                headers.put(name, values);</span>
+            }
+<span id="H1">            values.add(value);</span>
+
+<span id="H1">            return (T) this;</span>
+        }
+
+        @Override
+        public List&lt;String&gt; headers(String name) {
+<span id="H1">            Validate.notEmptyParam(name, &quot;name&quot;);</span>
+<span id="H1">            return getHeadersCaseInsensitive(name);</span>
+        }
+
+        @Override
+        public T header(String name, String value) {
+<span id="H2">            Validate.notEmptyParam(name, &quot;name&quot;);</span>
+<span id="H2">            removeHeader(name); // ensures we don&#x27;t get an &quot;accept-encoding&quot; and a &quot;Accept-Encoding&quot;</span>
+<span id="H2">            addHeader(name, value);</span>
+<span id="H2">            return (T) this;</span>
+        }
+
+        @Override
+        public boolean hasHeader(String name) {
+<span id="H2">            Validate.notEmptyParam(name, &quot;name&quot;);</span>
+<span id="H2">            return !getHeadersCaseInsensitive(name).isEmpty();</span>
+        }
+
+        /**
+         * Test if the request has a header with this value (case insensitive).
+         */
+        @Override
+        public boolean hasHeaderWithValue(String name, String value) {
+<span id="H2">            Validate.notEmpty(name);</span>
+<span id="H2">            Validate.notEmpty(value);</span>
+<span id="H2">            List&lt;String&gt; values = headers(name);</span>
+<span id="H2">            for (String candidate : values) {</span>
+<span id="H2">                if (value.equalsIgnoreCase(candidate))</span>
+<span id="H2">                    return true;</span>
+<span id="H2">            }</span>
+<span id="H2">            return false;</span>
+        }
+
+        @Override
+        public T removeHeader(String name) {
+<span id="H2">            Validate.notEmptyParam(name, &quot;name&quot;);</span>
+<span id="H2">            Map.Entry&lt;String, List&lt;String&gt;&gt; entry = scanHeaders(name); // remove is case-insensitive too</span>
+<span id="H2">            if (entry != null)</span>
+<span id="H2">                headers.remove(entry.getKey()); // ensures correct case</span>
+<span id="H2">            return (T) this;</span>
+        }
+
+        @Override
+        public Map&lt;String, String&gt; headers() {
+            LinkedHashMap&lt;String, String&gt; map = new LinkedHashMap&lt;&gt;(headers.size());
+            for (Map.Entry&lt;String, List&lt;String&gt;&gt; entry : headers.entrySet()) {
+                String header = entry.getKey();
+                List&lt;String&gt; values = entry.getValue();
+                if (values.size() &gt; 0)
+                    map.put(header, values.get(0));
+            }
+            return map;
+        }
+
+        @Override
+        public Map&lt;String, List&lt;String&gt;&gt; multiHeaders() {
+<span id="H2">            return headers;</span>
+        }
+
+        private List&lt;String&gt; getHeadersCaseInsensitive(String name) {
+<span id="H1">            Validate.notNull(name);</span>
+
+<span id="H1">            for (Map.Entry&lt;String, List&lt;String&gt;&gt; entry : headers.entrySet()) {</span>
+<span id="H1">                if (name.equalsIgnoreCase(entry.getKey()))</span>
+<span id="H2">                    return entry.getValue();</span>
+<span id="H1">            }</span>
+
+<span id="H1">            return Collections.emptyList();</span>
+        }
+
+        private Map.@Nullable Entry&lt;String, List&lt;String&gt;&gt; scanHeaders(String name) {
+<span id="H2">            String lc = lowerCase(name);</span>
+<span id="H2">            for (Map.Entry&lt;String, List&lt;String&gt;&gt; entry : headers.entrySet()) {</span>
+<span id="H2">                if (lowerCase(entry.getKey()).equals(lc))</span>
+<span id="H2">                    return entry;</span>
+<span id="H2">            }</span>
+<span id="H2">            return null;</span>
+        }
+
+        @Override
+        public String cookie(String name) {
+<span id="H2">            Validate.notEmptyParam(name, &quot;name&quot;);</span>
+<span id="H2">            return cookies.get(name);</span>
+        }
+
+        @Override
+        public T cookie(String name, String value) {
+<span id="H2">            Validate.notEmptyParam(name, &quot;name&quot;);</span>
+<span id="H2">            Validate.notNullParam(value, &quot;value&quot;);</span>
+<span id="H2">            cookies.put(name, value);</span>
+<span id="H2">            return (T) this;</span>
+        }
+
+        @Override
+        public boolean hasCookie(String name) {
+<span id="H2">            Validate.notEmptyParam(name, &quot;name&quot;);</span>
+<span id="H2">            return cookies.containsKey(name);</span>
+        }
+
+        @Override
+        public T removeCookie(String name) {
+            Validate.notEmptyParam(name, &quot;name&quot;);
+            cookies.remove(name);
+            return (T) this;
+        }
+
+        @Override
+        public Map&lt;String, String&gt; cookies() {
+<span id="H2">            return cookies;</span>
+        }
+    }
+
+    public static class Request extends HttpConnection.Base&lt;Connection.Request&gt; implements Connection.Request {
+        static {
+<span id="H1">            System.setProperty(&quot;sun.net.http.allowRestrictedHeaders&quot;, &quot;true&quot;);</span>
+            // make sure that we can send Sec-Fetch-Site headers etc.
+<span id="H1">        }</span>
+
+        private @Nullable Proxy proxy;
+        private int timeoutMilliseconds;
+        private int maxBodySizeBytes;
+        private boolean followRedirects;
+        private final Collection&lt;Connection.KeyVal&gt; data;
+<span id="H1">        private @Nullable String body = null;</span>
+<span id="H1">        private boolean ignoreHttpErrors = false;</span>
+<span id="H1">        private boolean ignoreContentType = false;</span>
+        private Parser parser;
+<span id="H1">        private boolean parserDefined = false; // called parser(...) vs initialized in ctor</span>
+<span id="H1">        private String postDataCharset = DataUtil.defaultCharsetName;</span>
+        private @Nullable SSLSocketFactory sslSocketFactory;
+        private CookieManager cookieManager;
+        private @Nullable RequestAuthenticator authenticator;
+<span id="H1">        private volatile boolean executing = false;</span>
+
+        Request() {
+<span id="H1">            super();</span>
+<span id="H1">            timeoutMilliseconds = 30000; // 30 seconds</span>
+<span id="H1">            maxBodySizeBytes = 1024 * 1024 * 2; // 2MB</span>
+<span id="H1">            followRedirects = true;</span>
+<span id="H1">            data = new ArrayList&lt;&gt;();</span>
+<span id="H1">            method = Method.GET;</span>
+<span id="H1">            addHeader(&quot;Accept-Encoding&quot;, &quot;gzip&quot;);</span>
+<span id="H1">            addHeader(USER_AGENT, DEFAULT_UA);</span>
+<span id="H1">            parser = Parser.htmlParser();</span>
+<span id="H1">            cookieManager = new CookieManager(); // creates a default InMemoryCookieStore</span>
+<span id="H1">        }</span>
+
+        Request(Request copy) {
+<span id="H2">            super(copy);</span>
+<span id="H2">            proxy = copy.proxy;</span>
+<span id="H2">            postDataCharset = copy.postDataCharset;</span>
+<span id="H2">            timeoutMilliseconds = copy.timeoutMilliseconds;</span>
+<span id="H2">            maxBodySizeBytes = copy.maxBodySizeBytes;</span>
+<span id="H2">            followRedirects = copy.followRedirects;</span>
+<span id="H2">            data = new ArrayList&lt;&gt;(); // data not copied</span>
+            //body not copied
+<span id="H2">            ignoreHttpErrors = copy.ignoreHttpErrors;</span>
+<span id="H2">            ignoreContentType = copy.ignoreContentType;</span>
+<span id="H2">            parser = copy.parser.newInstance(); // parsers and their tree-builders maintain state, so need a fresh copy</span>
+<span id="H2">            parserDefined = copy.parserDefined;</span>
+<span id="H2">            sslSocketFactory = copy.sslSocketFactory; // these are all synchronized so safe to share</span>
+<span id="H2">            cookieManager = copy.cookieManager;</span>
+<span id="H2">            authenticator = copy.authenticator;</span>
+<span id="H2">            executing = false;</span>
+<span id="H2">        }</span>
+
+        @Override
+        public Proxy proxy() {
+<span id="H2">            return proxy;</span>
+        }
+
+        @Override
+        public Request proxy(@Nullable Proxy proxy) {
+            this.proxy = proxy;
+            return this;
+        }
+
+        @Override
+        public Request proxy(String host, int port) {
+<span id="H2">            this.proxy = new Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved(host, port));</span>
+<span id="H2">            return this;</span>
+        }
+
+        @Override
+        public int timeout() {
+<span id="H2">            return timeoutMilliseconds;</span>
+        }
+
+        @Override
+        public Request timeout(int millis) {
+<span id="H2">            Validate.isTrue(millis &gt;= 0, &quot;Timeout milliseconds must be 0 (infinite) or greater&quot;);</span>
+<span id="H2">            timeoutMilliseconds = millis;</span>
+<span id="H2">            return this;</span>
+        }
+
+        @Override
+        public int maxBodySize() {
+<span id="H2">            return maxBodySizeBytes;</span>
+        }
+
+        @Override
+        public Connection.Request maxBodySize(int bytes) {
+<span id="H2">            Validate.isTrue(bytes &gt;= 0, &quot;maxSize must be 0 (unlimited) or larger&quot;);</span>
+<span id="H2">            maxBodySizeBytes = bytes;</span>
+<span id="H2">            return this;</span>
+        }
+
+        @Override
+        public boolean followRedirects() {
+<span id="H2">            return followRedirects;</span>
+        }
+
+        @Override
+        public Connection.Request followRedirects(boolean followRedirects) {
+            this.followRedirects = followRedirects;
+            return this;
+        }
+
+        @Override
+        public boolean ignoreHttpErrors() {
+<span id="H2">            return ignoreHttpErrors;</span>
+        }
+
+        @Override
+        public SSLSocketFactory sslSocketFactory() {
+<span id="H2">            return sslSocketFactory;</span>
+        }
+
+        @Override
+        public void sslSocketFactory(SSLSocketFactory sslSocketFactory) {
+            this.sslSocketFactory = sslSocketFactory;
+        }
+
+        @Override
+        public Connection.Request ignoreHttpErrors(boolean ignoreHttpErrors) {
+<span id="H2">            this.ignoreHttpErrors = ignoreHttpErrors;</span>
+<span id="H2">            return this;</span>
+        }
+
+        @Override
+        public boolean ignoreContentType() {
+<span id="H2">            return ignoreContentType;</span>
+        }
+
+        @Override
+        public Connection.Request ignoreContentType(boolean ignoreContentType) {
+<span id="H2">            this.ignoreContentType = ignoreContentType;</span>
+<span id="H2">            return this;</span>
+        }
+
+        @Override
+        public Request data(Connection.KeyVal keyval) {
+<span id="H2">            Validate.notNullParam(keyval, &quot;keyval&quot;);</span>
+<span id="H2">            data.add(keyval);</span>
+<span id="H2">            return this;</span>
+        }
+
+        @Override
+        public Collection&lt;Connection.KeyVal&gt; data() {
+<span id="H2">            return data;</span>
+        }
+
+        @Override
+        public Connection.Request requestBody(@Nullable String body) {
+<span id="H2">            this.body = body;</span>
+<span id="H2">            return this;</span>
+        }
+
+        @Override
+        public String requestBody() {
+<span id="H2">            return body;</span>
+        }
+
+        @Override
+        public Request parser(Parser parser) {
+<span id="H2">            this.parser = parser;</span>
+<span id="H2">            parserDefined = true;</span>
+<span id="H2">            return this;</span>
+        }
+
+        @Override
+        public Parser parser() {
+<span id="H2">            return parser;</span>
+        }
+
+        @Override
+        public Connection.Request postDataCharset(String charset) {
+            Validate.notNullParam(charset, &quot;charset&quot;);
+            if (!Charset.isSupported(charset)) throw new IllegalCharsetNameException(charset);
+            this.postDataCharset = charset;
+            return this;
+        }
+
+        @Override
+        public String postDataCharset() {
+<span id="H2">            return postDataCharset;</span>
+        }
+
+        CookieManager cookieManager() {
+<span id="H2">            return cookieManager;</span>
+        }
+
+        @Override public Connection.Request auth(@Nullable RequestAuthenticator authenticator) {
+<span id="H2">            this.authenticator = authenticator;</span>
+<span id="H2">            return this;</span>
+        }
+
+        @Override @Nullable public RequestAuthenticator auth() {
+<span id="H2">            return authenticator;</span>
+        }
+    }
+
+    public static class Response extends HttpConnection.Base&lt;Connection.Response&gt; implements Connection.Response {
+        private static final int MAX_REDIRECTS = 20;
+        private static final String LOCATION = &quot;Location&quot;;
+        private final int statusCode;
+        private final String statusMessage;
+        private @Nullable ByteBuffer byteData;
+        private @Nullable ControllableInputStream bodyStream;
+        private @Nullable HttpURLConnection conn;
+        private @Nullable String charset;
+        private @Nullable final String contentType;
+<span id="H2">        private boolean executed = false;</span>
+<span id="H2">        private boolean inputStreamRead = false;</span>
+<span id="H2">        private int numRedirects = 0;</span>
+        private final HttpConnection.Request req;
+
+        /*
+         * Matches XML content types (like text/xml, image/svg+xml, application/xhtml+xml;charset=UTF8, etc)
+         */
+<span id="H2">        private static final Pattern xmlContentTypeRxp = Pattern.compile(&quot;(\\w+)/\\w*\\+?xml.*&quot;);</span>
+
+        /**
+         &lt;b&gt;Internal only! &lt;/b&gt;Creates a dummy HttpConnection.Response, useful for testing. All actual responses
+         are created from the HttpURLConnection and fields defined.
+         */
+        Response() {
+<span id="H2">            super();</span>
+<span id="H2">            statusCode = 400;</span>
+<span id="H2">            statusMessage = &quot;Request not made&quot;;</span>
+<span id="H2">            req = new Request();</span>
+<span id="H2">            contentType = null;</span>
+<span id="H2">        }</span>
+
+        static Response execute(HttpConnection.Request req) throws IOException {
+<span id="H2">            return execute(req, null);</span>
+        }
+
+        static Response execute(HttpConnection.Request req, @Nullable Response previousResponse) throws IOException {
+<span id="H2">            synchronized (req) {</span>
+<span id="H2">                Validate.isFalse(req.executing, &quot;Multiple threads were detected trying to execute the same request concurrently. Make sure to use Connection#newRequest() and do not share an executing request between threads.&quot;);</span>
+<span id="H2">                req.executing = true;</span>
+<span id="H2">            }</span>
+<span id="H2">            Validate.notNullParam(req, &quot;req&quot;);</span>
+<span id="H2">            URL url = req.url();</span>
+<span id="H2">            Validate.notNull(url, &quot;URL must be specified to connect&quot;);</span>
+<span id="H2">            String protocol = url.getProtocol();</span>
+<span id="H2">            if (!protocol.equals(&quot;http&quot;) &amp;&amp; !protocol.equals(&quot;https&quot;))</span>
+<span id="H2">                throw new MalformedURLException(&quot;Only http &amp; https protocols supported&quot;);</span>
+<span id="H2">            final boolean methodHasBody = req.method().hasBody();</span>
+<span id="H2">            final boolean hasRequestBody = req.requestBody() != null;</span>
+<span id="H2">            if (!methodHasBody)</span>
+<span id="H2">                Validate.isFalse(hasRequestBody, &quot;Cannot set a request body for HTTP method &quot; + req.method());</span>
+
+            // set up the request for execution
+<span id="H2">            String mimeBoundary = null;</span>
+<span id="H2">            if (req.data().size() &gt; 0 &amp;&amp; (!methodHasBody || hasRequestBody))</span>
+<span id="H2">                serialiseRequestUrl(req);</span>
+<span id="H2">            else if (methodHasBody)</span>
+<span id="H2">                mimeBoundary = setOutputContentType(req);</span>
+
+<span id="H2">            long startTime = System.nanoTime();</span>
+<span id="H2">            HttpURLConnection conn = createConnection(req);</span>
+<span id="H2">            Response res = null;</span>
+            try {
+<span id="H2">                conn.connect();</span>
+<span id="H2">                if (conn.getDoOutput()) {</span>
+<span id="H2">                    OutputStream out = conn.getOutputStream();</span>
+<span id="H2">                    try { writePost(req, out, mimeBoundary); }</span>
+                    catch (IOException e) { conn.disconnect(); throw e; }
+<span id="H2">                    finally { out.close(); }</span>
+                }
+
+<span id="H2">                int status = conn.getResponseCode();</span>
+<span id="H2">                res = new Response(conn, req, previousResponse);</span>
+
+                // redirect if there&#x27;s a location header (from 3xx, or 201 etc)
+<span id="H2">                if (res.hasHeader(LOCATION) &amp;&amp; req.followRedirects()) {</span>
+<span id="H2">                    if (status != HTTP_TEMP_REDIR) {</span>
+<span id="H2">                        req.method(Method.GET); // always redirect with a get. any data param from original req are dropped.</span>
+<span id="H2">                        req.data().clear();</span>
+<span id="H2">                        req.requestBody(null);</span>
+<span id="H2">                        req.removeHeader(CONTENT_TYPE);</span>
+                    }
+
+<span id="H2">                    String location = res.header(LOCATION);</span>
+<span id="H2">                    Validate.notNull(location);</span>
+<span id="H2">                    if (location.startsWith(&quot;http:/&quot;) &amp;&amp; location.charAt(6) != &#x27;/&#x27;) // fix broken Location: http:/temp/AAG_New/en/index.php</span>
+                        location = location.substring(6);
+<span id="H2">                    URL redir = StringUtil.resolve(req.url(), location);</span>
+<span id="H2">                    req.url(redir);</span>
+
+<span id="H2">                    req.executing = false;</span>
+<span id="H2">                    return execute(req, res);</span>
+                }
+<span id="H2">                if ((status &lt; 200 || status &gt;= 400) &amp;&amp; !req.ignoreHttpErrors())</span>
+<span id="H2">                        throw new HttpStatusException(&quot;HTTP error fetching URL&quot;, status, req.url().toString());</span>
+
+                // check that we can handle the returned content type; if not, abort before fetching it
+<span id="H2">                String contentType = res.contentType();</span>
+<span id="H2">                if (contentType != null</span>
+<span id="H2">                        &amp;&amp; !req.ignoreContentType()</span>
+<span id="H2">                        &amp;&amp; !contentType.startsWith(&quot;text/&quot;)</span>
+<span id="H2">                        &amp;&amp; !xmlContentTypeRxp.matcher(contentType).matches()</span>
+                        )
+<span id="H2">                    throw new UnsupportedMimeTypeException(&quot;Unhandled content type. Must be text/*, */xml, or */*+xml&quot;,</span>
+<span id="H2">                            contentType, req.url().toString());</span>
+
+                // switch to the XML parser if content type is xml and not parser not explicitly set
+<span id="H2">                if (contentType != null &amp;&amp; xmlContentTypeRxp.matcher(contentType).matches()) {</span>
+<span id="H2">                    if (!req.parserDefined) req.parser(Parser.xmlParser());</span>
+                }
+
+<span id="H2">                res.charset = DataUtil.getCharsetFromContentType(res.contentType); // may be null, readInputStream deals with it</span>
+<span id="H2">                if (conn.getContentLength() != 0 &amp;&amp; req.method() != HEAD) { // -1 means unknown, chunked. sun throws an IO exception on 500 response with no content when trying to read body</span>
+<span id="H2">                    InputStream stream = conn.getErrorStream() != null ? conn.getErrorStream() : conn.getInputStream();</span>
+<span id="H2">                    if (res.hasHeaderWithValue(CONTENT_ENCODING, &quot;gzip&quot;))</span>
+                        stream = new GZIPInputStream(stream);
+<span id="H2">                    else if (res.hasHeaderWithValue(CONTENT_ENCODING, &quot;deflate&quot;))</span>
+<span id="H2">                        stream = new InflaterInputStream(stream, new Inflater(true));</span>
+                    
+<span id="H2">                    res.bodyStream = ControllableInputStream.wrap(</span>
+<span id="H2">                        stream, SharedConstants.DefaultBufferSize, req.maxBodySize())</span>
+<span id="H2">                        .timeout(startTime, req.timeout());</span>
+<span id="H2">                } else {</span>
+<span id="H2">                    res.byteData = DataUtil.emptyByteBuffer();</span>
+                }
+<span id="H2">            } catch (IOException e) {</span>
+<span id="H2">                if (res != null) res.safeClose(); // will be non-null if got to conn</span>
+<span id="H2">                throw e;</span>
+            } finally {
+<span id="H2">                req.executing = false;</span>
+
+                // detach any thread local auth delegate
+<span id="H2">                if (req.authenticator != null)</span>
+                    AuthenticationHandler.handler.remove();
+            }
+
+<span id="H2">            res.executed = true;</span>
+<span id="H2">            return res;</span>
+        }
+
+        @Override
+        public int statusCode() {
+<span id="H2">            return statusCode;</span>
+        }
+
+        @Override
+        public String statusMessage() {
+            return statusMessage;
+        }
+
+        @Override
+        public String charset() {
+<span id="H2">            return charset;</span>
+        }
+
+        @Override
+        public Response charset(String charset) {
+            this.charset = charset;
+            return this;
+        }
+
+        @Override
+        public String contentType() {
+<span id="H2">            return contentType;</span>
+        }
+
+        public Document parse() throws IOException {
+<span id="H2">            Validate.isTrue(executed, &quot;Request must be executed (with .execute(), .get(), or .post() before parsing response&quot;);</span>
+<span id="H2">            InputStream stream = bodyStream;</span>
+<span id="H2">            if (byteData != null) { // bytes have been read in to the buffer, parse that</span>
+<span id="H2">                stream = new ByteArrayInputStream(byteData.array());</span>
+<span id="H2">                inputStreamRead = false; // ok to reparse if in bytes</span>
+            }
+<span id="H2">            Validate.isFalse(inputStreamRead, &quot;Input stream already read and parsed, cannot re-read.&quot;);</span>
+<span id="H2">            Document doc = DataUtil.parseInputStream(stream, charset, url.toExternalForm(), req.parser());</span>
+<span id="H2">            doc.connection(new HttpConnection(req, this)); // because we&#x27;re static, don&#x27;t have the connection obj. // todo - maybe hold in the req?</span>
+<span id="H2">            charset = doc.outputSettings().charset().name(); // update charset from meta-equiv, possibly</span>
+<span id="H2">            inputStreamRead = true;</span>
+<span id="H2">            safeClose();</span>
+<span id="H2">            return doc;</span>
+        }
+
+        private void prepareByteData() {
+<span id="H2">            Validate.isTrue(executed, &quot;Request must be executed (with .execute(), .get(), or .post() before getting response body&quot;);</span>
+<span id="H2">            if (bodyStream != null &amp;&amp; byteData == null) {</span>
+<span id="H2">                Validate.isFalse(inputStreamRead, &quot;Request has already been read (with .parse())&quot;);</span>
+                try {
+<span id="H2">                    byteData = DataUtil.readToByteBuffer(bodyStream, req.maxBodySize());</span>
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                } finally {
+<span id="H2">                    inputStreamRead = true;</span>
+<span id="H2">                    safeClose();</span>
+                }
+            }
+<span id="H2">        }</span>
+
+        @Override
+        public String body() {
+<span id="H2">            prepareByteData();</span>
+<span id="H2">            Validate.notNull(byteData);</span>
+            // charset gets set from header on execute, and from meta-equiv on parse. parse may not have happened yet
+<span id="H2">            String body = (charset == null ? UTF_8 : Charset.forName(charset))</span>
+<span id="H2">                .decode(byteData).toString();</span>
+<span id="H2">            ((Buffer)byteData).rewind(); // cast to avoid covariant return type change in jdk9</span>
+<span id="H2">            return body;</span>
+        }
+
+        @Override
+        public byte[] bodyAsBytes() {
+<span id="H2">            prepareByteData();</span>
+<span id="H2">            Validate.notNull(byteData);</span>
+<span id="H2">            return byteData.array();</span>
+        }
+
+        @Override
+        public Connection.Response bufferUp() {
+<span id="H2">            prepareByteData();</span>
+<span id="H2">            return this;</span>
+        }
+
+        @Override
+        public BufferedInputStream bodyStream() {
+<span id="H2">            Validate.isTrue(executed, &quot;Request must be executed (with .execute(), .get(), or .post() before getting response body&quot;);</span>
+
+            // if we have read to bytes (via buffer up), return those as a stream.
+<span id="H2">            if (byteData != null) {</span>
+<span id="H2">                return new BufferedInputStream(new ByteArrayInputStream(byteData.array()), SharedConstants.DefaultBufferSize);</span>
+            }
+
+<span id="H2">            Validate.isFalse(inputStreamRead, &quot;Request has already been read&quot;);</span>
+<span id="H2">            Validate.notNull(bodyStream);</span>
+<span id="H2">            inputStreamRead = true;</span>
+<span id="H2">            return bodyStream.inputStream();</span>
+        }
+
+        // set up connection defaults, and details from request
+        private static HttpURLConnection createConnection(HttpConnection.Request req) throws IOException {
+<span id="H2">            Proxy proxy = req.proxy();</span>
+            final HttpURLConnection conn = (HttpURLConnection) (
+<span id="H2">                proxy == null ?</span>
+<span id="H2">                req.url().openConnection() :</span>
+<span id="H2">                req.url().openConnection(proxy)</span>
+            );
+
+<span id="H2">            conn.setRequestMethod(req.method().name());</span>
+<span id="H2">            conn.setInstanceFollowRedirects(false); // don&#x27;t rely on native redirection support</span>
+<span id="H2">            conn.setConnectTimeout(req.timeout());</span>
+<span id="H2">            conn.setReadTimeout(req.timeout() / 2); // gets reduced after connection is made and status is read</span>
+
+<span id="H2">            if (req.sslSocketFactory() != null &amp;&amp; conn instanceof HttpsURLConnection)</span>
+                ((HttpsURLConnection) conn).setSSLSocketFactory(req.sslSocketFactory());
+<span id="H2">            if (req.authenticator != null)</span>
+                AuthenticationHandler.handler.enable(req.authenticator, conn); // removed in finally
+<span id="H2">            if (req.method().hasBody())</span>
+<span id="H2">                conn.setDoOutput(true);</span>
+<span id="H2">            CookieUtil.applyCookiesToRequest(req, conn); // from the Request key/val cookies and the Cookie Store</span>
+<span id="H2">            for (Map.Entry&lt;String, List&lt;String&gt;&gt; header : req.multiHeaders().entrySet()) {</span>
+<span id="H2">                for (String value : header.getValue()) {</span>
+<span id="H2">                    conn.addRequestProperty(header.getKey(), value);</span>
+<span id="H2">                }</span>
+<span id="H2">            }</span>
+<span id="H2">            return conn;</span>
+        }
+
+        /**
+         * Call on completion of stream read, to close the body (or error) stream. The connection.disconnect allows
+         * keep-alives to work (as the underlying connection is actually held open, despite the name).
+         */
+        private void safeClose() {
+<span id="H2">            if (bodyStream != null) {</span>
+                try {
+<span id="H2">                    bodyStream.close();</span>
+                } catch (IOException e) {
+                    // no-op
+                } finally {
+<span id="H2">                    bodyStream = null;</span>
+                }
+            }
+<span id="H2">            if (conn != null) {</span>
+<span id="H2">                conn.disconnect();</span>
+<span id="H2">                conn = null;</span>
+            }
+<span id="H2">        }</span>
+
+        // set up url, method, header, cookies
+<span id="H2">        private Response(HttpURLConnection conn, HttpConnection.Request request, HttpConnection.@Nullable Response previousResponse) throws IOException {</span>
+<span id="H2">            this.conn = conn;</span>
+<span id="H2">            this.req = request;</span>
+<span id="H2">            method = Method.valueOf(conn.getRequestMethod());</span>
+<span id="H2">            url = conn.getURL();</span>
+<span id="H2">            statusCode = conn.getResponseCode();</span>
+<span id="H2">            statusMessage = conn.getResponseMessage();</span>
+<span id="H2">            contentType = conn.getContentType();</span>
+
+<span id="H2">            Map&lt;String, List&lt;String&gt;&gt; resHeaders = createHeaderMap(conn);</span>
+<span id="H2">            processResponseHeaders(resHeaders); // includes cookie key/val read during header scan</span>
+<span id="H2">            CookieUtil.storeCookies(req, url, resHeaders); // add set cookies to cookie store</span>
+
+<span id="H2">            if (previousResponse != null) { // was redirected</span>
+                // map previous response cookies into this response cookies() object
+<span id="H2">                for (Map.Entry&lt;String, String&gt; prevCookie : previousResponse.cookies().entrySet()) {</span>
+<span id="H2">                    if (!hasCookie(prevCookie.getKey()))</span>
+<span id="H2">                        cookie(prevCookie.getKey(), prevCookie.getValue());</span>
+<span id="H2">                }</span>
+<span id="H2">                previousResponse.safeClose();</span>
+
+                // enforce too many redirects:
+<span id="H2">                numRedirects = previousResponse.numRedirects + 1;</span>
+<span id="H2">                if (numRedirects &gt;= MAX_REDIRECTS)</span>
+<span id="H2">                    throw new IOException(String.format(&quot;Too many redirects occurred trying to load URL %s&quot;, previousResponse.url()));</span>
+            }
+<span id="H2">        }</span>
+
+        private static LinkedHashMap&lt;String, List&lt;String&gt;&gt; createHeaderMap(HttpURLConnection conn) {
+            // the default sun impl of conn.getHeaderFields() returns header values out of order
+<span id="H2">            final LinkedHashMap&lt;String, List&lt;String&gt;&gt; headers = new LinkedHashMap&lt;&gt;();</span>
+<span id="H2">            int i = 0;</span>
+            while (true) {
+<span id="H2">                final String key = conn.getHeaderFieldKey(i);</span>
+<span id="H2">                final String val = conn.getHeaderField(i);</span>
+<span id="H2">                if (key == null &amp;&amp; val == null)</span>
+<span id="H2">                    break;</span>
+<span id="H2">                i++;</span>
+<span id="H2">                if (key == null || val == null)</span>
+                    continue; // skip http1.1 line
+
+<span id="H2">                if (headers.containsKey(key))</span>
+<span id="H2">                    headers.get(key).add(val);</span>
+                else {
+<span id="H2">                    final ArrayList&lt;String&gt; vals = new ArrayList&lt;&gt;();</span>
+<span id="H2">                    vals.add(val);</span>
+<span id="H2">                    headers.put(key, vals);</span>
+                }
+<span id="H2">            }</span>
+<span id="H2">            return headers;</span>
+        }
+
+        void processResponseHeaders(Map&lt;String, List&lt;String&gt;&gt; resHeaders) {
+<span id="H2">            for (Map.Entry&lt;String, List&lt;String&gt;&gt; entry : resHeaders.entrySet()) {</span>
+<span id="H2">                String name = entry.getKey();</span>
+<span id="H2">                if (name == null)</span>
+                    continue; // http/1.1 line
+
+<span id="H2">                List&lt;String&gt; values = entry.getValue();</span>
+<span id="H2">                if (name.equalsIgnoreCase(&quot;Set-Cookie&quot;)) {</span>
+<span id="H2">                    for (String value : values) {</span>
+<span id="H2">                        if (value == null)</span>
+<span id="H3">                            continue;</span>
+<span id="H2">                        TokenQueue cd = new TokenQueue(value);</span>
+<span id="H2">                        String cookieName = cd.chompTo(&quot;=&quot;).trim();</span>
+<span id="H2">                        String cookieVal = cd.consumeTo(&quot;;&quot;).trim();</span>
+                        // ignores path, date, domain, validateTLSCertificates et al. full details will be available in cookiestore if required
+                        // name not blank, value not null
+<span id="H2">                        if (cookieName.length() &gt; 0 &amp;&amp; !cookies.containsKey(cookieName)) // if duplicates, only keep the first</span>
+<span id="H2">                            cookie(cookieName, cookieVal);</span>
+<span id="H2">                    }</span>
+                }
+<span id="H2">                for (String value : values) {</span>
+<span id="H2">                    addHeader(name, fixHeaderEncoding(value));</span>
+<span id="H2">                }</span>
+<span id="H2">            }</span>
+<span id="H2">        }</span>
+
+        /**
+         Servers may encode response headers in UTF-8 instead of RFC defined 8859. This method attempts to detect that
+         and re-decode the string as UTF-8.
+         * @param val a header value string that may have been incorrectly decoded as 8859.
+         * @return a potentially re-decoded string.
+         */
+        @Nullable
+        private static String fixHeaderEncoding(@Nullable String val) {
+<span id="H2">            if (val == null) return val;</span>
+<span id="H2">            byte[] bytes = val.getBytes(ISO_8859_1);</span>
+<span id="H2">            if (looksLikeUtf8(bytes))</span>
+                return new String(bytes, UTF_8);
+            else
+<span id="H2">                return val;</span>
+        }
+
+        private static boolean looksLikeUtf8(byte[] input) {
+<span id="H2">            int i = 0;</span>
+            // BOM:
+<span id="H2">            if (input.length &gt;= 3</span>
+                &amp;&amp; (input[0] &amp; 0xFF) == 0xEF
+                &amp;&amp; (input[1] &amp; 0xFF) == 0xBB
+                &amp;&amp; (input[2] &amp; 0xFF) == 0xBF) {
+                i = 3;
+            }
+
+            int end;
+<span id="H2">            boolean foundNonAscii = false;</span>
+<span id="H2">            for (int j = input.length; i &lt; j; ++i) {</span>
+<span id="H2">                int o = input[i];</span>
+<span id="H2">                if ((o &amp; 0x80) == 0) {</span>
+<span id="H2">                    continue; // ASCII</span>
+                }
+                foundNonAscii = true;
+
+                // UTF-8 leading:
+                if ((o &amp; 0xE0) == 0xC0) {
+                    end = i + 1;
+                } else if ((o &amp; 0xF0) == 0xE0) {
+                    end = i + 2;
+                } else if ((o &amp; 0xF8) == 0xF0) {
+                    end = i + 3;
+                } else {
+                    return false;
+                }
+
+                if (end &gt;= input.length)
+                    return false;
+
+                while (i &lt; end) {
+                    i++;
+                    o = input[i];
+                    if ((o &amp; 0xC0) != 0x80) {
+                        return false;
+                    }
+                }
+            }
+<span id="H2">            return foundNonAscii;</span>
+        }
+
+        private @Nullable static String setOutputContentType(final Connection.Request req) {
+<span id="H2">            final String contentType = req.header(CONTENT_TYPE);</span>
+<span id="H2">            String bound = null;</span>
+<span id="H2">            if (contentType != null) {</span>
+                // no-op; don&#x27;t add content type as already set (e.g. for requestBody())
+                // todo - if content type already set, we could add charset
+
+                // if user has set content type to multipart/form-data, auto add boundary.
+<span id="H2">                if(contentType.contains(MULTIPART_FORM_DATA) &amp;&amp; !contentType.contains(&quot;boundary&quot;)) {</span>
+<span id="H2">                    bound = DataUtil.mimeBoundary();</span>
+<span id="H2">                    req.header(CONTENT_TYPE, MULTIPART_FORM_DATA + &quot;; boundary=&quot; + bound);</span>
+                }
+
+            }
+<span id="H2">            else if (needsMultipart(req)) {</span>
+<span id="H3">                bound = DataUtil.mimeBoundary();</span>
+<span id="H3">                req.header(CONTENT_TYPE, MULTIPART_FORM_DATA + &quot;; boundary=&quot; + bound);</span>
+            } else {
+<span id="H2">                req.header(CONTENT_TYPE, FORM_URL_ENCODED + &quot;; charset=&quot; + req.postDataCharset());</span>
+            }
+<span id="H2">            return bound;</span>
+        }
+
+        private static void writePost(final Connection.Request req, final OutputStream outputStream, @Nullable final String boundary) throws IOException {
+<span id="H2">            final Collection&lt;Connection.KeyVal&gt; data = req.data();</span>
+<span id="H2">            final BufferedWriter w = new BufferedWriter(new OutputStreamWriter(outputStream, Charset.forName(req.postDataCharset())));</span>
+
+<span id="H2">            if (boundary != null) {</span>
+                // boundary will be set if we&#x27;re in multipart mode
+<span id="H2">                for (Connection.KeyVal keyVal : data) {</span>
+<span id="H2">                    w.write(&quot;--&quot;);</span>
+<span id="H2">                    w.write(boundary);</span>
+<span id="H2">                    w.write(&quot;\r\n&quot;);</span>
+<span id="H2">                    w.write(&quot;Content-Disposition: form-data; name=\&quot;&quot;);</span>
+<span id="H2">                    w.write(encodeMimeName(keyVal.key())); // encodes &quot; to %22</span>
+<span id="H2">                    w.write(&quot;\&quot;&quot;);</span>
+<span id="H2">                    final InputStream input = keyVal.inputStream();</span>
+<span id="H2">                    if (input != null) {</span>
+<span id="H3">                        w.write(&quot;; filename=\&quot;&quot;);</span>
+<span id="H3">                        w.write(encodeMimeName(keyVal.value()));</span>
+<span id="H3">                        w.write(&quot;\&quot;\r\nContent-Type: &quot;);</span>
+<span id="H3">                        String contentType = keyVal.contentType();</span>
+<span id="H3">                        w.write(contentType != null ? contentType : DefaultUploadType);</span>
+<span id="H3">                        w.write(&quot;\r\n\r\n&quot;);</span>
+<span id="H3">                        w.flush(); // flush</span>
+<span id="H3">                        DataUtil.crossStreams(input, outputStream);</span>
+<span id="H3">                        outputStream.flush();</span>
+<span id="H3">                    } else {</span>
+<span id="H2">                        w.write(&quot;\r\n\r\n&quot;);</span>
+<span id="H2">                        w.write(keyVal.value());</span>
+                    }
+<span id="H2">                    w.write(&quot;\r\n&quot;);</span>
+<span id="H2">                }</span>
+<span id="H2">                w.write(&quot;--&quot;);</span>
+<span id="H2">                w.write(boundary);</span>
+<span id="H2">                w.write(&quot;--&quot;);</span>
+            } else {
+<span id="H2">                String body = req.requestBody();</span>
+<span id="H2">                if (body != null) {</span>
+                    // data will be in query string, we&#x27;re sending a plaintext body
+<span id="H2">                    w.write(body);</span>
+                }
+                else {
+                    // regular form data (application/x-www-form-urlencoded)
+<span id="H2">                    boolean first = true;</span>
+<span id="H2">                    for (Connection.KeyVal keyVal : data) {</span>
+<span id="H2">                        if (!first)</span>
+<span id="H2">                            w.append(&#x27;&amp;&#x27;);</span>
+                        else
+<span id="H2">                            first = false;</span>
+
+<span id="H2">                        w.write(URLEncoder.encode(keyVal.key(), req.postDataCharset()));</span>
+<span id="H2">                        w.write(&#x27;=&#x27;);</span>
+<span id="H2">                        w.write(URLEncoder.encode(keyVal.value(), req.postDataCharset()));</span>
+<span id="H2">                    }</span>
+                }
+            }
+<span id="H2">            w.close();</span>
+<span id="H2">        }</span>
+
+        // for get url reqs, serialise the data map into the url
+        private static void serialiseRequestUrl(Connection.Request req) throws IOException {
+<span id="H2">            UrlBuilder in = new UrlBuilder(req.url());</span>
+
+<span id="H2">            for (Connection.KeyVal keyVal : req.data()) {</span>
+<span id="H2">                Validate.isFalse(keyVal.hasInputStream(), &quot;InputStream data not supported in URL query string.&quot;);</span>
+<span id="H2">                in.appendKeyVal(keyVal);</span>
+<span id="H2">            }</span>
+<span id="H2">            req.url(in.build());</span>
+<span id="H2">            req.data().clear(); // moved into url as get params</span>
+<span id="H2">        }</span>
+    }
+
+    private static boolean needsMultipart(Connection.Request req) {
+        // multipart mode, for files. add the header if we see something with an inputstream, and return a non-null boundary
+<span id="H2">        for (Connection.KeyVal keyVal : req.data()) {</span>
+<span id="H2">            if (keyVal.hasInputStream())</span>
+<span id="H3">                return true;</span>
+<span id="H2">        }</span>
+<span id="H2">        return false;</span>
+    }
+
+    public static class KeyVal implements Connection.KeyVal {
+        private String key;
+        private String value;
+        private @Nullable InputStream stream;
+        private @Nullable String contentType;
+
+        public static KeyVal create(String key, String value) {
+<span id="H0">            return new KeyVal(key, value);</span>
+        }
+
+        public static KeyVal create(String key, String filename, InputStream stream) {
+<span id="H0">            return new KeyVal(key, filename)</span>
+<span id="H0">                .inputStream(stream);</span>
+        }
+
+<span id="H0">        private KeyVal(String key, String value) {</span>
+<span id="H0">            Validate.notEmptyParam(key, &quot;key&quot;);</span>
+<span id="H0">            Validate.notNullParam(value, &quot;value&quot;);</span>
+<span id="H0">            this.key = key;</span>
+<span id="H0">            this.value = value;</span>
+<span id="H0">        }</span>
+
+        @Override
+        public KeyVal key(String key) {
+            Validate.notEmptyParam(key, &quot;key&quot;);
+            this.key = key;
+            return this;
+        }
+
+        @Override
+        public String key() {
+<span id="H0">            return key;</span>
+        }
+
+        @Override
+        public KeyVal value(String value) {
+<span id="H3">            Validate.notNullParam(value, &quot;value&quot;);</span>
+<span id="H3">            this.value = value;</span>
+<span id="H3">            return this;</span>
+        }
+
+        @Override
+        public String value() {
+<span id="H0">            return value;</span>
+        }
+
+        public KeyVal inputStream(InputStream inputStream) {
+<span id="H0">            Validate.notNullParam(value, &quot;inputStream&quot;);</span>
+<span id="H0">            this.stream = inputStream;</span>
+<span id="H0">            return this;</span>
+        }
+
+        @Override
+        public InputStream inputStream() {
+<span id="H2">            return stream;</span>
+        }
+
+        @Override
+        public boolean hasInputStream() {
+<span id="H0">            return stream != null;</span>
+        }
+
+        @Override
+        public Connection.KeyVal contentType(String contentType) {
+            Validate.notEmpty(contentType);
+            this.contentType = contentType;
+            return this;
+        }
+
+        @Override
+        public String contentType() {
+<span id="H3">            return contentType;</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H2">            return key + &quot;=&quot; + value;</span>
+        }
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

@@ -1,0 +1,158 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/internal/ControllableInputStream.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">internal</a>/ControllableInputStream.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.internal;
+
+import org.jsoup.helper.DataUtil;
+import org.jsoup.helper.Validate;
+
+import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.FilterInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.SocketTimeoutException;
+import java.nio.ByteBuffer;
+
+import static org.jsoup.internal.SharedConstants.DefaultBufferSize;
+
+/**
+ * A jsoup internal class (so don&#x27;t use it as there is no contract API) that enables controls on a Buffered Input Stream,
+ * namely a maximum read size, and the ability to Thread.interrupt() the read.
+ */
+// reimplemented from ConstrainableInputStream for JDK21 - extending BufferedInputStream will pin threads during read
+public class ControllableInputStream extends FilterInputStream {
+    private final BufferedInputStream buff;
+    private final boolean capped;
+    private final int maxSize;
+    private long startTime;
+<span id="H1">    private long timeout = 0; // optional max time of request</span>
+    private int remaining;
+    private int markPos;
+    private boolean interrupted;
+
+    private ControllableInputStream(BufferedInputStream in, int maxSize) {
+<span id="H1">        super(in);</span>
+<span id="H1">        Validate.isTrue(maxSize &gt;= 0);</span>
+<span id="H1">        buff = in;</span>
+<span id="H1">        capped = maxSize != 0;</span>
+<span id="H1">        this.maxSize = maxSize;</span>
+<span id="H1">        remaining = maxSize;</span>
+<span id="H1">        markPos = -1;</span>
+<span id="H1">        startTime = System.nanoTime();</span>
+<span id="H1">    }</span>
+
+    /**
+     * If this InputStream is not already a ControllableInputStream, let it be one.
+     * @param in the input stream to (maybe) wrap
+     * @param bufferSize the buffer size to use when reading
+     * @param maxSize the maximum size to allow to be read. 0 == infinite.
+     * @return a controllable input stream
+     */
+    public static ControllableInputStream wrap(InputStream in, int bufferSize, int maxSize) {
+<span id="H1">        if (in instanceof ControllableInputStream)</span>
+<span id="H2">            return (ControllableInputStream) in;</span>
+<span id="H1">        else if (in instanceof BufferedInputStream)</span>
+            return new ControllableInputStream((BufferedInputStream) in, maxSize);
+        else
+<span id="H1">            return new ControllableInputStream(new BufferedInputStream(in, bufferSize), maxSize);</span>
+    }
+
+    @Override
+    public int read(byte[] b, int off, int len) throws IOException {
+<span id="H1">        if (interrupted || capped &amp;&amp; remaining &lt;= 0)</span>
+<span id="H2">            return -1;</span>
+<span id="H1">        if (Thread.currentThread().isInterrupted()) {</span>
+            // interrupted latches, because parse() may call twice
+<span id="H2">            interrupted = true;</span>
+<span id="H2">            return -1;</span>
+        }
+<span id="H1">        if (expired())</span>
+<span id="H2">            throw new SocketTimeoutException(&quot;Read timeout&quot;);</span>
+
+<span id="H1">        if (capped &amp;&amp; len &gt; remaining)</span>
+<span id="H2">            len = remaining; // don&#x27;t read more than desired, even if available</span>
+
+        try {
+<span id="H1">            final int read = super.read(b, off, len);</span>
+<span id="H1">            remaining -= read;</span>
+<span id="H1">            return read;</span>
+<span id="H2">        } catch (SocketTimeoutException e) {</span>
+<span id="H2">            return 0;</span>
+        }
+    }
+
+    /**
+     * Reads this inputstream to a ByteBuffer. The supplied max may be less than the inputstream&#x27;s max, to support
+     * reading just the first bytes.
+     */
+    public static ByteBuffer readToByteBuffer(InputStream in, int max) throws IOException {
+<span id="H0">        Validate.isTrue(max &gt;= 0, &quot;maxSize must be 0 (unlimited) or larger&quot;);</span>
+<span id="H0">        Validate.notNull(in);</span>
+<span id="H0">        final boolean localCapped = max &gt; 0; // still possibly capped in total stream</span>
+<span id="H0">        final int bufferSize = localCapped &amp;&amp; max &lt; DefaultBufferSize ? max : DefaultBufferSize;</span>
+<span id="H0">        final byte[] readBuffer = new byte[bufferSize];</span>
+<span id="H0">        final ByteArrayOutputStream outStream = new ByteArrayOutputStream(bufferSize);</span>
+
+        int read;
+<span id="H0">        int remaining = max;</span>
+        while (true) {
+<span id="H0">            read = in.read(readBuffer, 0, localCapped ? Math.min(remaining, bufferSize) : bufferSize);</span>
+<span id="H0">            if (read == -1) break;</span>
+<span id="H0">            if (localCapped) { // this local byteBuffer cap may be smaller than the overall maxSize (like when reading first bytes)</span>
+<span id="H1">                if (read &gt;= remaining) {</span>
+<span id="H2">                    outStream.write(readBuffer, 0, remaining);</span>
+<span id="H2">                    break;</span>
+                }
+<span id="H1">                remaining -= read;</span>
+            }
+<span id="H0">            outStream.write(readBuffer, 0, read);</span>
+        }
+<span id="H0">        return ByteBuffer.wrap(outStream.toByteArray());</span>
+    }
+
+    @SuppressWarnings(&quot;NonSynchronizedMethodOverridesSynchronizedMethod&quot;) // not synchronized in later JDKs
+    @Override public void reset() throws IOException {
+<span id="H1">        super.reset();</span>
+<span id="H1">        remaining = maxSize - markPos;</span>
+<span id="H1">    }</span>
+
+    @SuppressWarnings(&quot;NonSynchronizedMethodOverridesSynchronizedMethod&quot;) // not synchronized in later JDKs
+    @Override public void mark(int readlimit) {
+<span id="H1">        super.mark(readlimit);</span>
+<span id="H1">        markPos = maxSize - remaining;</span>
+<span id="H1">    }</span>
+
+    public ControllableInputStream timeout(long startTimeNanos, long timeoutMillis) {
+<span id="H2">        this.startTime = startTimeNanos;</span>
+<span id="H2">        this.timeout = timeoutMillis * 1000000;</span>
+<span id="H2">        return this;</span>
+    }
+
+    private boolean expired() {
+<span id="H1">        if (timeout == 0)</span>
+<span id="H1">            return false;</span>
+
+<span id="H2">        final long now = System.nanoTime();</span>
+<span id="H2">        final long dur = now - startTime;</span>
+<span id="H2">        return (dur &gt; timeout);</span>
+    }
+
+    public BufferedInputStream inputStream() {
+<span id="H2">        return buff;</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

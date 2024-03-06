@@ -1,0 +1,153 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/select/CombiningEvaluator.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">select</a>/CombiningEvaluator.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.select;
+
+import org.jsoup.internal.StringUtil;
+import org.jsoup.nodes.Element;
+import org.jspecify.annotations.Nullable;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+
+/**
+ * Base combining (and, or) evaluator.
+ */
+public abstract class CombiningEvaluator extends Evaluator {
+    final ArrayList&lt;Evaluator&gt; evaluators; // maintain original order so that #toString() is sensible
+    final ArrayList&lt;Evaluator&gt; sortedEvaluators; // cost ascending order
+<span id="H2">    int num = 0;</span>
+<span id="H2">    int cost = 0;</span>
+
+    CombiningEvaluator() {
+<span id="H2">        super();</span>
+<span id="H2">        evaluators = new ArrayList&lt;&gt;();</span>
+<span id="H2">        sortedEvaluators = new ArrayList&lt;&gt;();</span>
+<span id="H2">    }</span>
+
+    CombiningEvaluator(Collection&lt;Evaluator&gt; evaluators) {
+<span id="H2">        this();</span>
+<span id="H2">        this.evaluators.addAll(evaluators);</span>
+<span id="H2">        updateEvaluators();</span>
+<span id="H2">    }</span>
+
+    @Override protected void reset() {
+<span id="H2">        for (Evaluator evaluator : evaluators) {</span>
+<span id="H2">            evaluator.reset();</span>
+<span id="H2">        }</span>
+<span id="H2">        super.reset();</span>
+<span id="H2">    }</span>
+
+    @Override protected int cost() {
+<span id="H2">        return cost;</span>
+    }
+
+    @Nullable Evaluator rightMostEvaluator() {
+<span id="H2">        return num &gt; 0 ? evaluators.get(num - 1) : null;</span>
+    }
+    
+    void replaceRightMostEvaluator(Evaluator replacement) {
+<span id="H2">        evaluators.set(num - 1, replacement);</span>
+<span id="H2">        updateEvaluators();</span>
+<span id="H2">    }</span>
+
+    void updateEvaluators() {
+        // used so we don&#x27;t need to bash on size() for every match test
+<span id="H2">        num = evaluators.size();</span>
+
+        // sort the evaluators by lowest cost first, to optimize the evaluation order
+<span id="H2">        cost = 0;</span>
+<span id="H2">        for (Evaluator evaluator : evaluators) {</span>
+<span id="H2">            cost += evaluator.cost();</span>
+<span id="H2">        }</span>
+<span id="H2">        sortedEvaluators.clear();</span>
+<span id="H2">        sortedEvaluators.addAll(evaluators);</span>
+<span id="H2">        Collections.sort(sortedEvaluators, costComparator);</span>
+<span id="H2">    }</span>
+
+<span id="H2">    private static final Comparator&lt;Evaluator&gt; costComparator = (o1, o2) -&gt; o1.cost() - o2.cost();</span>
+    // ^ comparingInt, sortedEvaluators.sort not available in targeted version
+
+    public static final class And extends CombiningEvaluator {
+        And(Collection&lt;Evaluator&gt; evaluators) {
+<span id="H2">            super(evaluators);</span>
+<span id="H2">        }</span>
+
+        And(Evaluator... evaluators) {
+<span id="H2">            this(Arrays.asList(evaluators));</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element element) {
+<span id="H2">            for (int i = 0; i &lt; num; i++) {</span>
+<span id="H2">                Evaluator s = sortedEvaluators.get(i);</span>
+<span id="H2">                if (!s.matches(root, element))</span>
+<span id="H2">                    return false;</span>
+            }
+<span id="H2">            return true;</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H2">            return StringUtil.join(evaluators, &quot;&quot;);</span>
+        }
+    }
+
+    public static final class Or extends CombiningEvaluator {
+        /**
+         * Create a new Or evaluator. The initial evaluators are ANDed together and used as the first clause of the OR.
+         * @param evaluators initial OR clause (these are wrapped into an AND evaluator).
+         */
+        Or(Collection&lt;Evaluator&gt; evaluators) {
+<span id="H2">            super();</span>
+<span id="H2">            if (num &gt; 1)</span>
+                this.evaluators.add(new And(evaluators));
+            else // 0 or 1
+<span id="H2">                this.evaluators.addAll(evaluators);</span>
+<span id="H2">            updateEvaluators();</span>
+<span id="H2">        }</span>
+
+<span id="H2">        Or(Evaluator... evaluators) { this(Arrays.asList(evaluators)); }</span>
+
+        Or() {
+<span id="H2">            super();</span>
+<span id="H2">        }</span>
+
+        public void add(Evaluator e) {
+<span id="H2">            evaluators.add(e);</span>
+<span id="H2">            updateEvaluators();</span>
+<span id="H2">        }</span>
+
+        @Override
+        public boolean matches(Element root, Element node) {
+<span id="H2">            for (int i = 0; i &lt; num; i++) {</span>
+<span id="H2">                Evaluator s = sortedEvaluators.get(i);</span>
+<span id="H2">                if (s.matches(root, node))</span>
+<span id="H2">                    return true;</span>
+            }
+<span id="H2">            return false;</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H3">            return StringUtil.join(evaluators, &quot;, &quot;);</span>
+        }
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

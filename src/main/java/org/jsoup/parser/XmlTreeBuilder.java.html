@@ -1,0 +1,207 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/parser/XmlTreeBuilder.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">parser</a>/XmlTreeBuilder.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.parser;
+
+import org.jsoup.helper.Validate;
+import org.jsoup.nodes.CDataNode;
+import org.jsoup.nodes.Comment;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.DocumentType;
+import org.jsoup.nodes.Element;
+import org.jsoup.nodes.Entities;
+import org.jsoup.nodes.LeafNode;
+import org.jsoup.nodes.Node;
+import org.jsoup.nodes.TextNode;
+import org.jsoup.nodes.XmlDeclaration;
+
+import java.io.Reader;
+import java.io.StringReader;
+import java.util.List;
+
+import static org.jsoup.parser.Parser.NamespaceXml;
+
+/**
+ * Use the {@code XmlTreeBuilder} when you want to parse XML without any of the HTML DOM rules being applied to the
+ * document.
+ * &lt;p&gt;Usage example: {@code Document xmlDoc = Jsoup.parse(html, baseUrl, Parser.xmlParser());}&lt;/p&gt;
+ *
+ * @author Jonathan Hedley
+ */
+<span id="H1">public class XmlTreeBuilder extends TreeBuilder {</span>
+    @Override ParseSettings defaultSettings() {
+<span id="H1">        return ParseSettings.preserveCase;</span>
+    }
+
+    @Override
+    protected void initialiseParse(Reader input, String baseUri, Parser parser) {
+<span id="H1">        super.initialiseParse(input, baseUri, parser);</span>
+<span id="H1">        stack.add(doc); // place the document onto the stack. differs from HtmlTreeBuilder (not on stack). Note not push()ed, so not onNodeInserted.</span>
+<span id="H1">        doc.outputSettings()</span>
+<span id="H1">            .syntax(Document.OutputSettings.Syntax.xml)</span>
+<span id="H1">            .escapeMode(Entities.EscapeMode.xhtml)</span>
+<span id="H1">            .prettyPrint(false); // as XML, we don&#x27;t understand what whitespace is significant or not</span>
+<span id="H1">    }</span>
+
+    Document parse(Reader input, String baseUri) {
+        return parse(input, baseUri, new Parser(this));
+    }
+
+    Document parse(String input, String baseUri) {
+<span id="H1">        return parse(new StringReader(input), baseUri, new Parser(this));</span>
+    }
+
+    @Override
+    XmlTreeBuilder newInstance() {
+<span id="H2">        return new XmlTreeBuilder();</span>
+    }
+
+    @Override public String defaultNamespace() {
+<span id="H1">        return NamespaceXml;</span>
+    }
+
+    @Override
+    protected boolean process(Token token) {
+<span id="H1">        currentToken = token;</span>
+
+        // start tag, end tag, doctype, comment, character, eof
+<span id="H1">        switch (token.type) {</span>
+            case StartTag:
+<span id="H1">                insertElementFor(token.asStartTag());</span>
+<span id="H1">                break;</span>
+            case EndTag:
+<span id="H1">                popStackToClose(token.asEndTag());</span>
+<span id="H1">                break;</span>
+            case Comment:
+<span id="H2">                insertCommentFor(token.asComment());</span>
+<span id="H2">                break;</span>
+            case Character:
+<span id="H1">                insertCharacterFor(token.asCharacter());</span>
+<span id="H1">                break;</span>
+            case Doctype:
+<span id="H2">                insertDoctypeFor(token.asDoctype());</span>
+<span id="H2">                break;</span>
+            case EOF: // could put some normalisation here if desired
+<span id="H1">                break;</span>
+            default:
+                Validate.fail(&quot;Unexpected token type: &quot; + token.type);
+        }
+<span id="H1">        return true;</span>
+    }
+
+    void insertElementFor(Token.StartTag startTag) {
+<span id="H1">        Tag tag = tagFor(startTag.name(), settings);</span>
+<span id="H1">        if (startTag.attributes != null)</span>
+<span id="H1">            startTag.attributes.deduplicate(settings);</span>
+
+<span id="H1">        Element el = new Element(tag, null, settings.normalizeAttributes(startTag.attributes));</span>
+<span id="H1">        currentElement().appendChild(el);</span>
+<span id="H1">        push(el);</span>
+
+<span id="H1">        if (startTag.isSelfClosing()) {</span>
+<span id="H2">            tag.setSelfClosing();</span>
+<span id="H2">            pop(); // push &amp; pop ensures onNodeInserted &amp; onNodeClosed</span>
+        }
+<span id="H1">    }</span>
+
+    void insertLeafNode(LeafNode node) {
+<span id="H1">        currentElement().appendChild(node);</span>
+<span id="H1">        onNodeInserted(node);</span>
+<span id="H1">    }</span>
+
+    void insertCommentFor(Token.Comment commentToken) {
+<span id="H2">        Comment comment = new Comment(commentToken.getData());</span>
+<span id="H2">        LeafNode insert = comment;</span>
+<span id="H2">        if (commentToken.bogus &amp;&amp; comment.isXmlDeclaration()) {</span>
+            // xml declarations are emitted as bogus comments (which is right for html, but not xml)
+            // so we do a bit of a hack and parse the data as an element to pull the attributes out
+            // todo - refactor this to parse more appropriately
+<span id="H3">            XmlDeclaration decl = comment.asXmlDeclaration(); // else, we couldn&#x27;t parse it as a decl, so leave as a comment</span>
+<span id="H3">            if (decl != null)</span>
+<span id="H3">                insert = decl;</span>
+        }
+<span id="H2">        insertLeafNode(insert);</span>
+<span id="H2">    }</span>
+
+    void insertCharacterFor(Token.Character token) {
+<span id="H1">        final String data = token.getData();</span>
+<span id="H1">        insertLeafNode(token.isCData() ? new CDataNode(data) : new TextNode(data));</span>
+<span id="H1">    }</span>
+
+    void insertDoctypeFor(Token.Doctype token) {
+<span id="H2">        DocumentType doctypeNode = new DocumentType(settings.normalizeTag(token.getName()), token.getPublicIdentifier(), token.getSystemIdentifier());</span>
+<span id="H2">        doctypeNode.setPubSysKey(token.getPubSysKey());</span>
+<span id="H2">        insertLeafNode(doctypeNode);</span>
+<span id="H2">    }</span>
+
+    /** @deprecated unused and will be removed. */
+    @Deprecated
+    protected void insertNode(Node node) {
+        currentElement().appendChild(node);
+        onNodeInserted(node);
+    }
+
+    /** @deprecated unused and will be removed. */
+    @Deprecated
+    protected void insertNode(Node node, Token token) {
+        currentElement().appendChild(node);
+        onNodeInserted(node);
+    }
+
+    /**
+     * If the stack contains an element with this tag&#x27;s name, pop up the stack to remove the first occurrence. If not
+     * found, skips.
+     *
+     * @param endTag tag to close
+     */
+    protected void popStackToClose(Token.EndTag endTag) {
+        // like in HtmlTreeBuilder - don&#x27;t scan up forever for very (artificially) deeply nested stacks
+<span id="H1">        String elName = settings.normalizeTag(endTag.tagName);</span>
+<span id="H1">        Element firstFound = null;</span>
+
+<span id="H1">        final int bottom = stack.size() - 1;</span>
+<span id="H1">        final int upper = bottom &gt;= maxQueueDepth ? bottom - maxQueueDepth : 0;</span>
+
+<span id="H1">        for (int pos = stack.size() -1; pos &gt;= upper; pos--) {</span>
+<span id="H1">            Element next = stack.get(pos);</span>
+<span id="H1">            if (next.nodeName().equals(elName)) {</span>
+<span id="H1">                firstFound = next;</span>
+<span id="H1">                break;</span>
+            }
+        }
+<span id="H1">        if (firstFound == null)</span>
+<span id="H1">            return; // not found, skip</span>
+
+<span id="H1">        for (int pos = stack.size() -1; pos &gt;= 0; pos--) {</span>
+<span id="H1">            Element next = pop();</span>
+<span id="H1">            if (next == firstFound) {</span>
+<span id="H1">                break;</span>
+            }
+        }
+<span id="H1">    }</span>
+    private static final int maxQueueDepth = 256; // an arbitrary tension point between real XML and crafted pain
+
+    List&lt;Node&gt; parseFragment(String inputFragment, String baseUri, Parser parser) {
+<span id="H2">        initialiseParse(new StringReader(inputFragment), baseUri, parser);</span>
+<span id="H2">        runParser();</span>
+<span id="H2">        return doc.childNodes();</span>
+    }
+
+    @Override List&lt;Node&gt; parseFragment(String inputFragment, Element context, String baseUri, Parser parser) {
+<span id="H2">        return parseFragment(inputFragment, baseUri, parser);</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

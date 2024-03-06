@@ -1,0 +1,39 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/nodes/PseudoTextElement.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">nodes</a>/PseudoTextElement.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.nodes;
+
+import org.jsoup.parser.Tag;
+
+/**
+ * Represents a {@link TextNode} as an {@link Element}, to enable text nodes to be selected with
+ * the {@link org.jsoup.select.Selector} {@code :matchText} syntax.
+ */
+public class PseudoTextElement extends Element {
+
+    public PseudoTextElement(Tag tag, String baseUri, Attributes attributes) {
+<span id="H2">        super(tag, baseUri, attributes);</span>
+<span id="H2">    }</span>
+
+    @Override
+    void outerHtmlHead(Appendable accum, int depth, Document.OutputSettings out) {
+<span id="H2">    }</span>
+
+    @Override
+    void outerHtmlTail(Appendable accum, int depth, Document.OutputSettings out) {
+<span id="H2">    }</span>
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

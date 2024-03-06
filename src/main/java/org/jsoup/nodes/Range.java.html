@@ -1,0 +1,276 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/nodes/Range.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">nodes</a>/Range.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.nodes;
+
+import static org.jsoup.internal.SharedConstants.*;
+
+/**
+ A Range object tracks the character positions in the original input source where a Node starts or ends. If you want to
+ track these positions, tracking must be enabled in the Parser with
+ {@link org.jsoup.parser.Parser#setTrackPosition(boolean)}.
+ @see Node#sourceRange()
+ @since 1.15.2
+ */
+public class Range {
+<span id="H2">    private static final Position UntrackedPos = new Position(-1, -1, -1);</span>
+    private final Position start, end;
+
+    /** An untracked source range. */
+<span id="H2">    static final Range Untracked = new Range(UntrackedPos, UntrackedPos);</span>
+
+    /**
+     Creates a new Range with start and end Positions. Called by TreeBuilder when position tracking is on.
+     * @param start the start position
+     * @param end the end position
+     */
+<span id="H2">    public Range(Position start, Position end) {</span>
+<span id="H2">        this.start = start;</span>
+<span id="H2">        this.end = end;</span>
+<span id="H2">    }</span>
+
+    /**
+     Get the start position of this node.
+     * @return the start position
+     */
+    public Position start() {
+<span id="H2">        return start;</span>
+    }
+
+    /**
+     Get the starting cursor position of this range.
+     @return the 0-based start cursor position.
+     @since 1.17.1
+     */
+    public int startPos() {
+<span id="H2">        return start.pos;</span>
+    }
+
+    /**
+     Get the end position of this node.
+     * @return the end position
+     */
+    public Position end() {
+<span id="H2">        return end;</span>
+    }
+
+    /**
+     Get the ending cursor position of this range.
+     @return the 0-based ending cursor position.
+     @since 1.17.1
+     */
+    public int endPos() {
+<span id="H2">        return end.pos;</span>
+    }
+
+    /**
+     Test if this source range was tracked during parsing.
+     * @return true if this was tracked during parsing, false otherwise (and all fields will be {@code -1}).
+     */
+    public boolean isTracked() {
+<span id="H2">        return this != Untracked;</span>
+    }
+
+    /**
+     Checks if the range represents a node that was implicitly created / closed.
+     &lt;p&gt;For example, with HTML of {@code &lt;p&gt;One&lt;p&gt;Two}, both {@code p} elements will have an explicit
+     {@link Element#sourceRange()} but an implicit {@link Element#endSourceRange()} marking the end position, as neither
+     have closing {@code &lt;/p&gt;} tags. The TextNodes will have explicit sourceRanges.
+     &lt;p&gt;A range is considered implicit if its start and end positions are the same.
+     @return true if the range is tracked and its start and end positions are the same, false otherwise.
+     @since 1.17.1
+     */
+    public boolean isImplicit() {
+<span id="H2">        if (!isTracked()) return false;</span>
+<span id="H2">        return start.equals(end);</span>
+    }
+
+    /**
+     Retrieves the source range for a given Node.
+     * @param node the node to retrieve the position for
+     * @param start if this is the starting range. {@code false} for Element end tags.
+     * @return the Range, or the Untracked (-1) position if tracking is disabled.
+     */
+    static Range of(Node node, boolean start) {
+<span id="H2">        final String key = start ? RangeKey : EndRangeKey;</span>
+<span id="H2">        if (!node.hasAttributes()) return Untracked;</span>
+<span id="H2">        Object range = node.attributes().userData(key);</span>
+<span id="H2">        return range != null ? (Range) range : Untracked;</span>
+    }
+
+    /**
+     @deprecated no-op; internal method moved out of visibility
+     */
+    @Deprecated
+    public void track(Node node, boolean start) {}
+
+    @Override
+    public boolean equals(Object o) {
+<span id="H2">        if (this == o) return true;</span>
+<span id="H2">        if (o == null || getClass() != o.getClass()) return false;</span>
+
+<span id="H2">        Range range = (Range) o;</span>
+
+<span id="H2">        if (!start.equals(range.start)) return false;</span>
+<span id="H2">        return end.equals(range.end);</span>
+    }
+
+    @Override
+    public int hashCode() {
+        int result = start.hashCode();
+        result = 31 * result + end.hashCode();
+        return result;
+    }
+
+    /**
+     Gets a String presentation of this Range, in the format {@code line,column:pos-line,column:pos}.
+     * @return a String
+     */
+    @Override
+    public String toString() {
+<span id="H2">        return start + &quot;-&quot; + end;</span>
+    }
+
+    /**
+     A Position object tracks the character position in the original input source where a Node starts or ends. If you want to
+     track these positions, tracking must be enabled in the Parser with
+     {@link org.jsoup.parser.Parser#setTrackPosition(boolean)}.
+     @see Node#sourceRange()
+     */
+    public static class Position {
+        private final int pos, lineNumber, columnNumber;
+
+        /**
+         Create a new Position object. Called by the TreeBuilder if source position tracking is on.
+         * @param pos position index
+         * @param lineNumber line number
+         * @param columnNumber column number
+         */
+<span id="H2">        public Position(int pos, int lineNumber, int columnNumber) {</span>
+<span id="H2">            this.pos = pos;</span>
+<span id="H2">            this.lineNumber = lineNumber;</span>
+<span id="H2">            this.columnNumber = columnNumber;</span>
+<span id="H2">        }</span>
+
+        /**
+         Gets the position index (0-based) of the original input source that this Position was read at. This tracks the
+         total number of characters read into the source at this position, regardless of the number of preceding lines.
+         * @return the position, or {@code -1} if untracked.
+         */
+        public int pos() {
+<span id="H2">            return pos;</span>
+        }
+
+        /**
+         Gets the line number (1-based) of the original input source that this Position was read at.
+         * @return the line number, or {@code -1} if untracked.
+         */
+        public int lineNumber() {
+<span id="H2">            return lineNumber;</span>
+        }
+
+        /**
+         Gets the cursor number (1-based) of the original input source that this Position was read at. The cursor number
+         resets to 1 on every new line.
+         * @return the cursor number, or {@code -1} if untracked.
+         */
+        public int columnNumber() {
+<span id="H2">            return columnNumber;</span>
+        }
+
+        /**
+         Test if this position was tracked during parsing.
+         * @return true if this was tracked during parsing, false otherwise (and all fields will be {@code -1}).
+         */
+        public boolean isTracked() {
+<span id="H2">            return this != UntrackedPos;</span>
+        }
+
+        /**
+         Gets a String presentation of this Position, in the format {@code line,column:pos}.
+         * @return a String
+         */
+        @Override
+        public String toString() {
+<span id="H2">            return lineNumber + &quot;,&quot; + columnNumber + &quot;:&quot; + pos;</span>
+        }
+
+        @Override
+        public boolean equals(Object o) {
+<span id="H2">            if (this == o) return true;</span>
+<span id="H2">            if (o == null || getClass() != o.getClass()) return false;</span>
+<span id="H2">            Position position = (Position) o;</span>
+<span id="H2">            if (pos != position.pos) return false;</span>
+<span id="H2">            if (lineNumber != position.lineNumber) return false;</span>
+<span id="H2">            return columnNumber == position.columnNumber;</span>
+        }
+
+        @Override
+        public int hashCode() {
+            int result = pos;
+            result = 31 * result + lineNumber;
+            result = 31 * result + columnNumber;
+            return result;
+        }
+    }
+
+    public static class AttributeRange {
+<span id="H2">        static final AttributeRange UntrackedAttr = new AttributeRange(Range.Untracked, Range.Untracked);</span>
+
+        private final Range nameRange;
+        private final Range valueRange;
+
+        /** Creates a new AttributeRange. Called during parsing by Token.StartTag. */
+<span id="H2">        public AttributeRange(Range nameRange, Range valueRange) {</span>
+<span id="H2">            this.nameRange = nameRange;</span>
+<span id="H2">            this.valueRange = valueRange;</span>
+<span id="H2">        }</span>
+
+        /** Get the source range for the attribute&#x27;s name. */
+        public Range nameRange() {
+<span id="H2">            return nameRange;</span>
+        }
+
+        /** Get the source range for the attribute&#x27;s value. */
+        public Range valueRange() {
+<span id="H2">            return valueRange;</span>
+        }
+
+        /** Get a String presentation of this Attribute range, in the form
+         {@code line,column:pos-line,column:pos=line,column:pos-line,column:pos} (name start - name end = val start - val end).
+         . */
+        @Override public String toString() {
+<span id="H4">            return nameRange().toString() + &quot;=&quot; + valueRange().toString();</span>
+        }
+
+        @Override public boolean equals(Object o) {
+<span id="H4">            if (this == o) return true;</span>
+            if (o == null || getClass() != o.getClass()) return false;
+
+            AttributeRange that = (AttributeRange) o;
+
+            if (!nameRange.equals(that.nameRange)) return false;
+            return valueRange.equals(that.valueRange);
+        }
+
+        @Override public int hashCode() {
+            int result = nameRange.hashCode();
+            result = 31 * result + valueRange.hashCode();
+            return result;
+        }
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

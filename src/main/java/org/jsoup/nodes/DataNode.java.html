@@ -1,0 +1,85 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/nodes/DataNode.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">nodes</a>/DataNode.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.nodes;
+
+import java.io.IOException;
+import org.jsoup.nodes.Entities.EscapeMode;
+
+/**
+ A data node, for contents of style, script tags etc, where contents should not show in text().
+
+ @author Jonathan Hedley, jonathan@hedley.net */
+public class DataNode extends LeafNode {
+
+    /**
+     Create a new DataNode.
+     @param data data contents
+     */
+<span id="H1">    public DataNode(String data) {</span>
+<span id="H1">        value = data;</span>
+<span id="H1">    }</span>
+
+    public String nodeName() {
+<span id="H1">        return &quot;#data&quot;;</span>
+    }
+
+    /**
+     Get the data contents of this node. Will be unescaped and with original new lines, space etc.
+     @return data
+     */
+    public String getWholeData() {
+<span id="H1">        return coreValue();</span>
+    }
+
+    /**
+     * Set the data contents of this node.
+     * @param data unencoded data
+     * @return this node, for chaining
+     */
+    public DataNode setWholeData(String data) {
+<span id="H3">        coreValue(data);</span>
+<span id="H3">        return this;</span>
+    }
+
+    @Override
+    void outerHtmlHead(Appendable accum, int depth, Document.OutputSettings out) throws IOException {
+<span id="H2">        if (out.syntax() == Document.OutputSettings.Syntax.xml) {</span>
+            // In XML mode, output data nodes as CDATA, so can parse as XML
+<span id="H2">            accum</span>
+<span id="H2">                .append(&quot;&lt;![CDATA[&quot;)</span>
+<span id="H2">                .append(getWholeData())</span>
+<span id="H2">                .append(&quot;]]&gt;&quot;);</span>
+        } else {
+            // In HTML, data is not escaped in return from data nodes, so &quot; in script, style is plain
+<span id="H2">            accum.append(getWholeData());</span>
+        }
+<span id="H2">    }</span>
+
+    @Override
+<span id="H2">    void outerHtmlTail(Appendable accum, int depth, Document.OutputSettings out) {}</span>
+
+    @Override
+    public String toString() {
+        return outerHtml();
+    }
+
+    @Override
+    public DataNode clone() {
+        return (DataNode) super.clone();
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

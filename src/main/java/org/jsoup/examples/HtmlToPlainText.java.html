@@ -1,0 +1,147 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/examples/HtmlToPlainText.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">examples</a>/HtmlToPlainText.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.examples;
+
+import org.jsoup.Jsoup;
+import org.jsoup.internal.StringUtil;
+import org.jsoup.helper.Validate;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.nodes.Node;
+import org.jsoup.nodes.TextNode;
+import org.jsoup.select.Elements;
+import org.jsoup.select.NodeTraversor;
+import org.jsoup.select.NodeVisitor;
+
+import java.io.IOException;
+
+/**
+ * HTML to plain-text. This example program demonstrates the use of jsoup to convert HTML input to lightly-formatted
+ * plain-text. That is divergent from the general goal of jsoup&#x27;s .text() methods, which is to get clean data from a
+ * scrape.
+ * &lt;p&gt;
+ * Note that this is a fairly simplistic formatter -- for real world use you&#x27;ll want to embrace and extend.
+ * &lt;/p&gt;
+ * &lt;p&gt;
+ * To invoke from the command line, assuming you&#x27;ve downloaded the jsoup jar to your current directory:&lt;/p&gt;
+ * &lt;p&gt;&lt;code&gt;java -cp jsoup.jar org.jsoup.examples.HtmlToPlainText url [selector]&lt;/code&gt;&lt;/p&gt;
+ * where &lt;i&gt;url&lt;/i&gt; is the URL to fetch, and &lt;i&gt;selector&lt;/i&gt; is an optional CSS selector.
+ * 
+ * @author Jonathan Hedley, jonathan@hedley.net
+ */
+public class HtmlToPlainText {
+    private static final String userAgent = &quot;Mozilla/5.0 (jsoup)&quot;;
+    private static final int timeout = 5 * 1000;
+
+    public static void main(String... args) throws IOException {
+        Validate.isTrue(args.length == 1 || args.length == 2, &quot;usage: java -cp jsoup.jar org.jsoup.examples.HtmlToPlainText url [selector]&quot;);
+        final String url = args[0];
+        final String selector = args.length == 2 ? args[1] : null;
+
+        // fetch the specified URL and parse to a HTML DOM
+        Document doc = Jsoup.connect(url).userAgent(userAgent).timeout(timeout).get();
+
+        HtmlToPlainText formatter = new HtmlToPlainText();
+
+        if (selector != null) {
+            Elements elements = doc.select(selector); // get each element that matches the CSS selector
+            for (Element element : elements) {
+                String plainText = formatter.getPlainText(element); // format that element to plain text
+                System.out.println(plainText);
+            }
+        } else { // format the whole doc
+            String plainText = formatter.getPlainText(doc);
+            System.out.println(plainText);
+        }
+    }
+
+    /**
+     * Format an Element to plain-text
+     * @param element the root element to format
+     * @return formatted text
+     */
+    public String getPlainText(Element element) {
+        FormattingVisitor formatter = new FormattingVisitor();
+        NodeTraversor.traverse(formatter, element); // walk the DOM, and call .head() and .tail() for each node
+
+        return formatter.toString();
+    }
+
+    // the formatting rules, implemented in a breadth-first DOM traverse
+    private static class FormattingVisitor implements NodeVisitor {
+        private static final int maxWidth = 80;
+        private int width = 0;
+        private StringBuilder accum = new StringBuilder(); // holds the accumulated text
+
+        // hit when the node is first seen
+        public void head(Node node, int depth) {
+            String name = node.nodeName();
+            if (node instanceof TextNode)
+                append(((TextNode) node).text()); // TextNodes carry all user-readable text in the DOM.
+            else if (name.equals(&quot;li&quot;))
+                append(&quot;\n * &quot;);
+            else if (name.equals(&quot;dt&quot;))
+                append(&quot;  &quot;);
+            else if (StringUtil.in(name, &quot;p&quot;, &quot;h1&quot;, &quot;h2&quot;, &quot;h3&quot;, &quot;h4&quot;, &quot;h5&quot;, &quot;tr&quot;))
+                append(&quot;\n&quot;);
+        }
+
+        // hit when all of the node&#x27;s children (if any) have been visited
+        public void tail(Node node, int depth) {
+            String name = node.nodeName();
+            if (StringUtil.in(name, &quot;br&quot;, &quot;dd&quot;, &quot;dt&quot;, &quot;p&quot;, &quot;h1&quot;, &quot;h2&quot;, &quot;h3&quot;, &quot;h4&quot;, &quot;h5&quot;))
+                append(&quot;\n&quot;);
+            else if (name.equals(&quot;a&quot;))
+                append(String.format(&quot; &lt;%s&gt;&quot;, node.absUrl(&quot;href&quot;)));
+        }
+
+        // appends text to the string builder with a simple word wrap method
+        private void append(String text) {
+            if (text.startsWith(&quot;\n&quot;))
+                width = 0; // reset counter if starts with a newline. only from formats above, not in natural text
+            if (text.equals(&quot; &quot;) &amp;&amp;
+                    (accum.length() == 0 || StringUtil.in(accum.substring(accum.length() - 1), &quot; &quot;, &quot;\n&quot;)))
+                return; // don&#x27;t accumulate long runs of empty spaces
+
+            if (text.length() + width &gt; maxWidth) { // won&#x27;t fit, needs to wrap
+                String[] words = text.split(&quot;\\s+&quot;);
+                for (int i = 0; i &lt; words.length; i++) {
+                    String word = words[i];
+                    boolean last = i == words.length - 1;
+                    if (!last) // insert a space if not the last word
+                        word = word + &quot; &quot;;
+                    if (word.length() + width &gt; maxWidth) { // wrap and reset counter
+                        accum.append(&quot;\n&quot;).append(word);
+                        width = word.length();
+                    } else {
+                        accum.append(word);
+                        width += word.length();
+                    }
+                }
+            } else { // fits as is, without need to wrap text
+                accum.append(text);
+                width += text.length();
+            }
+        }
+
+        @Override
+        public String toString() {
+            return accum.toString();
+        }
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

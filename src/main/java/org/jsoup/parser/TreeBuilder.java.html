@@ -1,0 +1,300 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/parser/TreeBuilder.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">parser</a>/TreeBuilder.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.parser;
+
+import org.jsoup.helper.Validate;
+import org.jsoup.internal.SharedConstants;
+import org.jsoup.nodes.Attributes;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.nodes.Node;
+import org.jsoup.nodes.Range;
+
+import java.io.Reader;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.jsoup.parser.Parser.NamespaceHtml;
+
+/**
+ * @author Jonathan Hedley
+ */
+<span id="H1">abstract class TreeBuilder {</span>
+    protected Parser parser;
+    CharacterReader reader;
+    Tokeniser tokeniser;
+    Document doc; // current doc we are building into
+    ArrayList&lt;Element&gt; stack; // the stack of open elements
+    String baseUri; // current base uri, for creating new elements
+    Token currentToken; // currentToken is used only for error tracking.
+    ParseSettings settings;
+    Map&lt;String, Tag&gt; seenTags; // tags we&#x27;ve used in this parse; saves tag GC for custom tags.
+
+    private Token.StartTag start; // start tag to process
+<span id="H1">    private final Token.EndTag end  = new Token.EndTag(this);</span>
+    abstract ParseSettings defaultSettings();
+
+    boolean trackSourceRange;  // optionally tracks the source range of nodes and attributes
+
+    void initialiseParse(Reader input, String baseUri, Parser parser) {
+<span id="H1">        Validate.notNullParam(input, &quot;input&quot;);</span>
+<span id="H1">        Validate.notNullParam(baseUri, &quot;baseUri&quot;);</span>
+<span id="H1">        Validate.notNull(parser);</span>
+
+<span id="H1">        doc = new Document(parser.defaultNamespace(), baseUri);</span>
+<span id="H1">        doc.parser(parser);</span>
+<span id="H1">        this.parser = parser;</span>
+<span id="H1">        settings = parser.settings();</span>
+<span id="H1">        reader = new CharacterReader(input);</span>
+<span id="H1">        trackSourceRange = parser.isTrackPosition();</span>
+<span id="H1">        reader.trackNewlines(parser.isTrackErrors() || trackSourceRange); // when tracking errors or source ranges, enable newline tracking for better legibility</span>
+<span id="H1">        currentToken = null;</span>
+<span id="H1">        tokeniser = new Tokeniser(this);</span>
+<span id="H1">        stack = new ArrayList&lt;&gt;(32);</span>
+<span id="H1">        seenTags = new HashMap&lt;&gt;();</span>
+<span id="H1">        start = new Token.StartTag(this);</span>
+<span id="H1">        this.baseUri = baseUri;</span>
+<span id="H1">    }</span>
+
+    Document parse(Reader input, String baseUri, Parser parser) {
+<span id="H1">        initialiseParse(input, baseUri, parser);</span>
+<span id="H1">        runParser();</span>
+
+        // tidy up - as the Parser and Treebuilder are retained in document for settings / fragments
+<span id="H1">        reader.close();</span>
+<span id="H1">        reader = null;</span>
+<span id="H1">        tokeniser = null;</span>
+<span id="H1">        stack = null;</span>
+<span id="H1">        seenTags = null;</span>
+
+<span id="H1">        return doc;</span>
+    }
+
+    /**
+     Create a new copy of this TreeBuilder
+     @return copy, ready for a new parse
+     */
+    abstract TreeBuilder newInstance();
+
+    abstract List&lt;Node&gt; parseFragment(String inputFragment, Element context, String baseUri, Parser parser);
+
+    void runParser() {
+<span id="H1">        final Tokeniser tokeniser = this.tokeniser;</span>
+<span id="H1">        final Token.TokenType eof = Token.TokenType.EOF;</span>
+
+        while (true) {
+<span id="H1">            Token token = tokeniser.read();</span>
+<span id="H1">            currentToken = token;</span>
+<span id="H1">            process(token);</span>
+<span id="H1">            if (token.type == eof)</span>
+<span id="H1">                break;</span>
+<span id="H1">            token.reset();</span>
+<span id="H1">        }</span>
+
+        // once we hit the end, pop remaining items off the stack
+<span id="H1">        while (!stack.isEmpty()) pop();</span>
+<span id="H1">    }</span>
+
+    abstract boolean process(Token token);
+
+    boolean processStartTag(String name) {
+        // these are &quot;virtual&quot; start tags (auto-created by the treebuilder), so not tracking the start position
+<span id="H1">        final Token.StartTag start = this.start;</span>
+<span id="H1">        if (currentToken == start) { // don&#x27;t recycle an in-use token</span>
+            return process(new Token.StartTag(this).name(name));
+        }
+<span id="H1">        return process(start.reset().name(name));</span>
+    }
+
+    boolean processStartTag(String name, Attributes attrs) {
+<span id="H2">        final Token.StartTag start = this.start;</span>
+<span id="H2">        if (currentToken == start) { // don&#x27;t recycle an in-use token</span>
+            return process(new Token.StartTag(this).nameAttr(name, attrs));
+        }
+<span id="H2">        start.reset();</span>
+<span id="H2">        start.nameAttr(name, attrs);</span>
+<span id="H2">        return process(start);</span>
+    }
+
+    boolean processEndTag(String name) {
+<span id="H1">        if (currentToken == end) { // don&#x27;t recycle an in-use token</span>
+            return process(new Token.EndTag(this).name(name));
+        }
+<span id="H1">        return process(end.reset().name(name));</span>
+    }
+
+    /**
+     Removes the last Element from the stack, hits onNodeClosed, and then returns it.
+     * @return
+     */
+    final Element pop() {
+<span id="H1">        int size = stack.size();</span>
+<span id="H1">        Element removed = stack.remove(size - 1);</span>
+<span id="H1">        onNodeClosed(removed);</span>
+<span id="H1">        return removed;</span>
+    }
+
+    /**
+     Adds the specified Element to the end of the stack, and hits onNodeInserted.
+     * @param element
+     */
+    final void push(Element element) {
+<span id="H1">        stack.add(element);</span>
+<span id="H1">        onNodeInserted(element);</span>
+<span id="H1">    }</span>
+
+    /**
+     Get the current element (last on the stack). If all items have been removed, returns the document instead
+     (which might not actually be on the stack; use stack.size() == 0 to test if required.
+     @return the last element on the stack, if any; or the root document
+     */
+    Element currentElement() {
+<span id="H1">        int size = stack.size();</span>
+<span id="H1">        return size &gt; 0 ? stack.get(size-1) : doc;</span>
+    }
+
+    /**
+     Checks if the Current Element&#x27;s normal name equals the supplied name, in the HTML namespace.
+     @param normalName name to check
+     @return true if there is a current element on the stack, and its name equals the supplied
+     */
+    boolean currentElementIs(String normalName) {
+<span id="H1">        if (stack.size() == 0)</span>
+<span id="H2">            return false;</span>
+<span id="H1">        Element current = currentElement();</span>
+<span id="H1">        return current != null &amp;&amp; current.normalName().equals(normalName)</span>
+<span id="H1">            &amp;&amp; current.tag().namespace().equals(NamespaceHtml);</span>
+    }
+
+    /**
+     Checks if the Current Element&#x27;s normal name equals the supplied name, in the specified namespace.
+     @param normalName name to check
+     @param namespace the namespace
+     @return true if there is a current element on the stack, and its name equals the supplied
+     */
+    boolean currentElementIs(String normalName, String namespace) {
+        if (stack.size() == 0)
+            return false;
+        Element current = currentElement();
+        return current != null &amp;&amp; current.normalName().equals(normalName)
+            &amp;&amp; current.tag().namespace().equals(namespace);
+    }
+
+    /**
+     * If the parser is tracking errors, add an error at the current position.
+     * @param msg error message
+     */
+    void error(String msg) {
+        error(msg, (Object[]) null);
+    }
+
+    /**
+     * If the parser is tracking errors, add an error at the current position.
+     * @param msg error message template
+     * @param args template arguments
+     */
+    void error(String msg, Object... args) {
+<span id="H2">        ParseErrorList errors = parser.getErrors();</span>
+<span id="H2">        if (errors.canAddError())</span>
+<span id="H2">            errors.add(new ParseError(reader, msg, args));</span>
+<span id="H2">    }</span>
+
+    /**
+     (An internal method, visible for Element. For HTML parse, signals that script and style text should be treated as
+     Data Nodes).
+     */
+    boolean isContentForTagData(String normalName) {
+<span id="H2">        return false;</span>
+    }
+
+    Tag tagFor(String tagName, String namespace, ParseSettings settings) {
+<span id="H1">        Tag cached = seenTags.get(tagName); // note that we don&#x27;t normalize the cache key. But tag via valueOf may be normalized.</span>
+<span id="H1">        if (cached == null || !cached.namespace().equals(namespace)) {</span>
+            // only return from cache if the namespace is the same. not running nested cache to save double hit on the common flow
+<span id="H1">            Tag tag = Tag.valueOf(tagName, namespace, settings);</span>
+<span id="H1">            seenTags.put(tagName, tag);</span>
+<span id="H1">            return tag;</span>
+        }
+<span id="H1">        return cached;</span>
+    }
+
+    Tag tagFor(String tagName, ParseSettings settings) {
+<span id="H1">        return tagFor(tagName, defaultNamespace(), settings);</span>
+    }
+
+    /**
+     Gets the default namespace for this TreeBuilder
+     * @return the default namespace
+     */
+    String defaultNamespace() {
+<span id="H1">        return NamespaceHtml;</span>
+    }
+
+    /**
+     Called by implementing TreeBuilders when a node has been inserted. This implementation includes optionally tracking
+     the source range of the node.  @param node the node that was just inserted
+     */
+    void onNodeInserted(Node node) {
+<span id="H1">        trackNodePosition(node, true);</span>
+<span id="H1">    }</span>
+
+    /**
+     Called by implementing TreeBuilders when a node is explicitly closed. This implementation includes optionally
+     tracking the closing source range of the node.  @param node the node being closed
+     */
+    void onNodeClosed(Node node) {
+<span id="H1">        trackNodePosition(node, false);</span>
+<span id="H1">    }</span>
+
+    private void trackNodePosition(Node node, boolean isStart) {
+<span id="H1">        if (!trackSourceRange) return;</span>
+
+<span id="H2">        final Token token = currentToken;</span>
+<span id="H2">        int startPos = token.startPos();</span>
+<span id="H2">        int endPos = token.endPos();</span>
+
+        // handle implicit element open / closes.
+<span id="H2">        if (node instanceof Element) {</span>
+<span id="H2">            final Element el = (Element) node;</span>
+<span id="H2">            if (token.isEOF()) {</span>
+<span id="H2">                if (el.endSourceRange().isTracked())</span>
+<span id="H2">                    return; // /body and /html are left on stack until EOF, don&#x27;t reset them</span>
+<span id="H2">                startPos = endPos = reader.pos();</span>
+<span id="H2">            } else if (isStart) { // opening tag</span>
+<span id="H2">                if  (!token.isStartTag() || !el.normalName().equals(token.asStartTag().normalName)) {</span>
+<span id="H2">                    endPos = startPos;</span>
+                }
+            } else { // closing tag
+<span id="H2">                if (!el.tag().isEmpty() &amp;&amp; !el.tag().isSelfClosing()) {</span>
+<span id="H2">                    if (!token.isEndTag() || !el.normalName().equals(token.asEndTag().normalName)) {</span>
+<span id="H2">                        endPos = startPos;</span>
+                    }
+                }
+            }
+        }
+
+<span id="H2">        Range.Position startPosition = new Range.Position</span>
+<span id="H2">            (startPos, reader.lineNumber(startPos), reader.columnNumber(startPos));</span>
+<span id="H2">        Range.Position endPosition = new Range.Position</span>
+<span id="H2">            (endPos, reader.lineNumber(endPos), reader.columnNumber(endPos));</span>
+<span id="H2">        Range range = new Range(startPosition, endPosition);</span>
+<span id="H2">        node.attributes().userData(isStart ? SharedConstants.RangeKey : SharedConstants.EndRangeKey, range);</span>
+<span id="H2">    }</span>
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

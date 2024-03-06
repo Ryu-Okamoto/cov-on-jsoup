@@ -1,0 +1,112 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/nodes/XmlDeclaration.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">nodes</a>/XmlDeclaration.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.nodes;
+
+import org.jsoup.SerializationException;
+import org.jsoup.internal.StringUtil;
+import org.jsoup.helper.Validate;
+
+import java.io.IOException;
+
+/**
+ * An XML Declaration.
+ */
+public class XmlDeclaration extends LeafNode {
+    // todo this impl isn&#x27;t really right, the data shouldn&#x27;t be attributes, just a run of text after the name
+    private final boolean isProcessingInstruction; // &lt;! if true, &lt;? if false, declaration (and last data char should be ?)
+
+    /**
+     * Create a new XML declaration
+     * @param name of declaration
+     * @param isProcessingInstruction is processing instruction
+     */
+<span id="H3">    public XmlDeclaration(String name, boolean isProcessingInstruction) {</span>
+<span id="H3">        Validate.notNull(name);</span>
+<span id="H3">        value = name;</span>
+<span id="H3">        this.isProcessingInstruction = isProcessingInstruction;</span>
+<span id="H3">    }</span>
+
+    public String nodeName() {
+<span id="H3">        return &quot;#declaration&quot;;</span>
+    }
+
+    /**
+     * Get the name of this declaration.
+     * @return name of this declaration.
+     */
+    public String name() {
+<span id="H4">        return coreValue();</span>
+    }
+
+    /**
+     * Get the unencoded XML declaration.
+     * @return XML declaration
+     */
+    public String getWholeDeclaration() {
+<span id="H4">        StringBuilder sb = StringUtil.borrowBuilder();</span>
+        try {
+<span id="H4">            getWholeDeclaration(sb, new Document.OutputSettings());</span>
+        } catch (IOException e) {
+            throw new SerializationException(e);
+<span id="H4">        }</span>
+<span id="H4">        return StringUtil.releaseBuilder(sb).trim();</span>
+    }
+
+    private void getWholeDeclaration(Appendable accum, Document.OutputSettings out) throws IOException {
+<span id="H4">        for (Attribute attribute : attributes()) {</span>
+<span id="H4">            String key = attribute.getKey();</span>
+<span id="H4">            String val = attribute.getValue();</span>
+<span id="H4">            if (!key.equals(nodeName())) { // skips coreValue (name)</span>
+<span id="H4">                accum.append(&#x27; &#x27;);</span>
+                // basically like Attribute, but skip empty vals in XML
+<span id="H4">                accum.append(key);</span>
+<span id="H4">                if (!val.isEmpty()) {</span>
+<span id="H4">                    accum.append(&quot;=\&quot;&quot;);</span>
+<span id="H4">                    Entities.escape(accum, val, out, true, false, false, false);</span>
+<span id="H4">                    accum.append(&#x27;&quot;&#x27;);</span>
+                }
+            }
+<span id="H4">        }</span>
+<span id="H4">    }</span>
+
+    @Override
+    void outerHtmlHead(Appendable accum, int depth, Document.OutputSettings out) throws IOException {
+<span id="H4">        accum</span>
+<span id="H4">            .append(&quot;&lt;&quot;)</span>
+<span id="H4">            .append(isProcessingInstruction ? &quot;!&quot; : &quot;?&quot;)</span>
+<span id="H4">            .append(coreValue());</span>
+<span id="H4">        getWholeDeclaration(accum, out);</span>
+<span id="H4">        accum</span>
+<span id="H4">            .append(isProcessingInstruction ? &quot;!&quot; : &quot;?&quot;)</span>
+<span id="H4">            .append(&quot;&gt;&quot;);</span>
+<span id="H4">    }</span>
+
+    @Override
+    void outerHtmlTail(Appendable accum, int depth, Document.OutputSettings out) {
+<span id="H4">    }</span>
+
+    @Override
+    public String toString() {
+        return outerHtml();
+    }
+
+    @Override
+    public XmlDeclaration clone() {
+        return (XmlDeclaration) super.clone();
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>

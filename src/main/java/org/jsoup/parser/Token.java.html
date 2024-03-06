@@ -1,0 +1,588 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>src/main/java/org/jsoup/parser/Token.java</title>
+<link rel="stylesheet" href="../../../../../../__resource__/styles.css" type="text/css">
+</head>
+<body>
+<div class="directory">
+<a href="../../../../../index.html">src</a>/<a href="../../../../index.html">main</a>/<a href="../../../index.html">java</a>/<a href="../../index.html">org</a>/<a href="../index.html">jsoup</a>/<a href="index.html">parser</a>/Token.java
+</div>
+<div class="viewer">
+<pre class="source-code" id="source-code">package org.jsoup.parser;
+
+import org.jsoup.helper.Validate;
+import org.jsoup.internal.Normalizer;
+import org.jsoup.nodes.Attributes;
+import org.jsoup.nodes.Range;
+import org.jspecify.annotations.Nullable;
+
+import java.util.HashMap;
+import java.util.Map;
+
+import static org.jsoup.internal.SharedConstants.*;
+
+
+/**
+ * Parse tokens for the Tokeniser.
+ */
+abstract class Token {
+    final TokenType type; // used in switches in TreeBuilder vs .getClass()
+    static final int Unset = -1;
+<span id="H1">    private int startPos, endPos = Unset; // position in CharacterReader this token was read from</span>
+
+<span id="H1">    private Token(TokenType type) {</span>
+<span id="H1">        this.type = type;</span>
+<span id="H1">    }</span>
+    
+    String tokenType() {
+<span id="H2">        return this.getClass().getSimpleName();</span>
+    }
+
+    /**
+     * Reset the data represent by this token, for reuse. Prevents the need to create transfer objects for every
+     * piece of data, which immediately get GCed.
+     */
+    Token reset() {
+<span id="H1">        startPos = Unset;</span>
+<span id="H1">        endPos = Unset;</span>
+<span id="H1">        return this;</span>
+    }
+
+    int startPos() {
+<span id="H2">        return startPos;</span>
+    }
+
+    void startPos(int pos) {
+<span id="H1">        startPos = pos;</span>
+<span id="H1">    }</span>
+
+    int endPos() {
+<span id="H2">        return endPos;</span>
+    }
+
+    void endPos(int pos) {
+<span id="H1">        endPos = pos;</span>
+<span id="H1">    }</span>
+
+    static void reset(StringBuilder sb) {
+<span id="H1">        if (sb != null) {</span>
+<span id="H1">            sb.delete(0, sb.length());</span>
+        }
+<span id="H1">    }</span>
+
+    static final class Doctype extends Token {
+<span id="H1">        final StringBuilder name = new StringBuilder();</span>
+<span id="H1">        String pubSysKey = null;</span>
+<span id="H1">        final StringBuilder publicIdentifier = new StringBuilder();</span>
+<span id="H1">        final StringBuilder systemIdentifier = new StringBuilder();</span>
+<span id="H1">        boolean forceQuirks = false;</span>
+
+        Doctype() {
+<span id="H1">            super(TokenType.Doctype);</span>
+<span id="H1">        }</span>
+
+        @Override
+        Token reset() {
+<span id="H2">            super.reset();</span>
+<span id="H2">            reset(name);</span>
+<span id="H2">            pubSysKey = null;</span>
+<span id="H2">            reset(publicIdentifier);</span>
+<span id="H2">            reset(systemIdentifier);</span>
+<span id="H2">            forceQuirks = false;</span>
+<span id="H2">            return this;</span>
+        }
+
+        String getName() {
+<span id="H2">            return name.toString();</span>
+        }
+
+        String getPubSysKey() {
+<span id="H2">            return pubSysKey;</span>
+        }
+
+        String getPublicIdentifier() {
+<span id="H2">            return publicIdentifier.toString();</span>
+        }
+
+        public String getSystemIdentifier() {
+<span id="H2">            return systemIdentifier.toString();</span>
+        }
+
+        public boolean isForceQuirks() {
+<span id="H2">            return forceQuirks;</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H2">            return &quot;&lt;!doctype &quot; + getName() + &quot;&gt;&quot;;</span>
+        }
+    }
+
+<span id="H1">    static abstract class Tag extends Token {</span>
+        @Nullable protected String tagName;
+        @Nullable protected String normalName; // lc version of tag name, for case-insensitive tree build
+<span id="H1">        boolean selfClosing = false;</span>
+        @Nullable Attributes attributes; // start tags get attributes on construction. End tags get attributes on first new attribute (but only for parser convenience, not used).
+
+        @Nullable private String attrName; // try to get attr names and vals in one shot, vs Builder
+<span id="H1">        private final StringBuilder attrNameSb = new StringBuilder();</span>
+<span id="H1">        private boolean hasAttrName = false;</span>
+
+        @Nullable private String attrValue;
+<span id="H1">        private final StringBuilder attrValueSb = new StringBuilder();</span>
+<span id="H1">        private boolean hasAttrValue = false;</span>
+<span id="H1">        private boolean hasEmptyAttrValue = false; // distinguish boolean attribute from empty string value</span>
+
+        // attribute source range tracking
+        final TreeBuilder treeBuilder;
+        final boolean trackSource;
+        int attrNameStart, attrNameEnd, attrValStart, attrValEnd;
+
+        Tag(TokenType type, TreeBuilder treeBuilder) {
+<span id="H1">            super(type);</span>
+<span id="H1">            this.treeBuilder = treeBuilder;</span>
+<span id="H1">            this.trackSource = treeBuilder.trackSourceRange;</span>
+<span id="H1">        }</span>
+
+        @Override
+        Tag reset() {
+<span id="H1">            super.reset();</span>
+<span id="H1">            tagName = null;</span>
+<span id="H1">            normalName = null;</span>
+<span id="H1">            selfClosing = false;</span>
+<span id="H1">            attributes = null;</span>
+<span id="H1">            resetPendingAttr();</span>
+<span id="H1">            return this;</span>
+        }
+
+        private void resetPendingAttr() {
+<span id="H1">            reset(attrNameSb);</span>
+<span id="H1">            attrName = null;</span>
+<span id="H1">            hasAttrName = false;</span>
+
+<span id="H1">            reset(attrValueSb);</span>
+<span id="H1">            attrValue = null;</span>
+<span id="H1">            hasEmptyAttrValue = false;</span>
+<span id="H1">            hasAttrValue = false;</span>
+
+<span id="H1">            if (trackSource)</span>
+<span id="H2">                attrNameStart = attrNameEnd = attrValStart = attrValEnd = Unset;</span>
+<span id="H1">        }</span>
+
+        /* Limits runaway crafted HTML from spewing attributes and getting a little sluggish in ensureCapacity.
+        Real-world HTML will P99 around 8 attributes, so plenty of headroom. Implemented here and not in the Attributes
+        object so that API users can add more if ever required. */
+        private static final int MaxAttributes = 512;
+
+        final void newAttribute() {
+<span id="H1">            if (attributes == null)</span>
+<span id="H1">                attributes = new Attributes();</span>
+
+<span id="H1">            if (hasAttrName &amp;&amp; attributes.size() &lt; MaxAttributes) {</span>
+                // the tokeniser has skipped whitespace control chars, but trimming could collapse to empty for other control codes, so verify here
+<span id="H1">                String name = attrNameSb.length() &gt; 0 ? attrNameSb.toString() : attrName;</span>
+<span id="H1">                name = name.trim();</span>
+<span id="H1">                if (name.length() &gt; 0) {</span>
+                    String value;
+<span id="H1">                    if (hasAttrValue)</span>
+<span id="H1">                        value = attrValueSb.length() &gt; 0 ? attrValueSb.toString() : attrValue;</span>
+<span id="H1">                    else if (hasEmptyAttrValue)</span>
+<span id="H2">                        value = &quot;&quot;;</span>
+                    else
+<span id="H1">                        value = null;</span>
+                    // note that we add, not put. So that the first is kept, and rest are deduped, once in a context where case sensitivity is known, and we can warn for duplicates.
+<span id="H1">                    attributes.add(name, value);</span>
+
+<span id="H1">                    trackAttributeRange(name);</span>
+                }
+            }
+<span id="H1">            resetPendingAttr();</span>
+<span id="H1">        }</span>
+
+        private void trackAttributeRange(String name) {
+<span id="H1">            if (trackSource &amp;&amp; isStartTag()) {</span>
+<span id="H2">                final StartTag start = asStartTag();</span>
+<span id="H2">                final CharacterReader r = start.treeBuilder.reader;</span>
+<span id="H2">                final boolean preserve = start.treeBuilder.settings.preserveAttributeCase();</span>
+
+<span id="H2">                assert attributes != null;</span>
+                //noinspection unchecked
+<span id="H2">                Map&lt;String, Range.AttributeRange&gt; attrRanges =</span>
+<span id="H2">                    (Map&lt;String, Range.AttributeRange&gt;) attributes.userData(AttrRangeKey);</span>
+<span id="H2">                if (attrRanges == null) {</span>
+<span id="H2">                    attrRanges = new HashMap&lt;&gt;();</span>
+<span id="H2">                    attributes.userData(AttrRangeKey, attrRanges);</span>
+                }
+
+<span id="H2">                if (!preserve) name = Normalizer.lowerCase(name);</span>
+<span id="H2">                if (attrRanges.containsKey(name)) return; // dedupe ranges as we go; actual attributes get deduped later for error count</span>
+
+                // if there&#x27;s no value (e.g. boolean), make it an implicit range at current
+<span id="H2">                if (!hasAttrValue) attrValStart = attrValEnd = attrNameEnd;</span>
+
+<span id="H2">                Range.AttributeRange range = new Range.AttributeRange(</span>
+                    new Range(
+<span id="H2">                        new Range.Position(attrNameStart, r.lineNumber(attrNameStart), r.columnNumber(attrNameStart)),</span>
+<span id="H2">                        new Range.Position(attrNameEnd, r.lineNumber(attrNameEnd), r.columnNumber(attrNameEnd))),</span>
+                    new Range(
+<span id="H2">                        new Range.Position(attrValStart, r.lineNumber(attrValStart), r.columnNumber(attrValStart)),</span>
+<span id="H2">                        new Range.Position(attrValEnd, r.lineNumber(attrValEnd), r.columnNumber(attrValEnd)))</span>
+                );
+<span id="H2">                attrRanges.put(name, range);</span>
+            }
+<span id="H1">        }</span>
+
+        final boolean hasAttributes() {
+<span id="H1">            return attributes != null;</span>
+        }
+
+        /** Case-sensitive check */
+        final boolean hasAttribute(String key) {
+<span id="H2">            return attributes != null &amp;&amp; attributes.hasKey(key);</span>
+        }
+
+        final boolean hasAttributeIgnoreCase(String key) {
+            return attributes != null &amp;&amp; attributes.hasKeyIgnoreCase(key);
+        }
+
+        final void finaliseTag() {
+            // finalises for emit
+<span id="H1">            if (hasAttrName) {</span>
+<span id="H1">                newAttribute();</span>
+            }
+<span id="H1">        }</span>
+
+        /** Preserves case */
+        final String name() { // preserves case, for input into Tag.valueOf (which may drop case)
+<span id="H1">            Validate.isFalse(tagName == null || tagName.length() == 0);</span>
+<span id="H1">            return tagName;</span>
+        }
+
+        /** Lower case */
+        final String normalName() { // lower case, used in tree building for working out where in tree it should go
+<span id="H1">            return normalName;</span>
+        }
+
+        final String toStringName() {
+<span id="H2">            return tagName != null ? tagName : &quot;[unset]&quot;;</span>
+        }
+
+        final Tag name(String name) {
+<span id="H1">            tagName = name;</span>
+<span id="H1">            normalName = ParseSettings.normalName(tagName);</span>
+<span id="H1">            return this;</span>
+        }
+
+        final boolean isSelfClosing() {
+<span id="H1">            return selfClosing;</span>
+        }
+
+        // these appenders are rarely hit in not null state-- caused by null chars.
+        final void appendTagName(String append) {
+            // might have null chars - need to replace with null replacement character
+<span id="H1">            append = append.replace(TokeniserState.nullChar, Tokeniser.replacementChar);</span>
+<span id="H1">            tagName = tagName == null ? append : tagName.concat(append);</span>
+<span id="H1">            normalName = ParseSettings.normalName(tagName);</span>
+<span id="H1">        }</span>
+
+        final void appendTagName(char append) {
+<span id="H1">            appendTagName(String.valueOf(append));</span>
+<span id="H1">        }</span>
+
+        final void appendAttributeName(String append, int startPos, int endPos) {
+            // might have null chars because we eat in one pass - need to replace with null replacement character
+<span id="H1">            append = append.replace(TokeniserState.nullChar, Tokeniser.replacementChar);</span>
+
+<span id="H1">            ensureAttrName(startPos, endPos);</span>
+<span id="H1">            if (attrNameSb.length() == 0) {</span>
+<span id="H1">                attrName = append;</span>
+            } else {
+<span id="H1">                attrNameSb.append(append);</span>
+            }
+<span id="H1">        }</span>
+
+        final void appendAttributeName(char append, int startPos, int endPos) {
+<span id="H1">            ensureAttrName(startPos, endPos);</span>
+<span id="H1">            attrNameSb.append(append);</span>
+<span id="H1">        }</span>
+
+        final void appendAttributeValue(String append, int startPos, int endPos) {
+<span id="H1">            ensureAttrValue(startPos, endPos);</span>
+<span id="H1">            if (attrValueSb.length() == 0) {</span>
+<span id="H1">                attrValue = append;</span>
+            } else {
+<span id="H1">                attrValueSb.append(append);</span>
+            }
+<span id="H1">        }</span>
+
+        final void appendAttributeValue(char append, int startPos, int endPos) {
+<span id="H1">            ensureAttrValue(startPos, endPos);</span>
+<span id="H1">            attrValueSb.append(append);</span>
+<span id="H1">        }</span>
+
+        final void appendAttributeValue(int[] appendCodepoints, int startPos, int endPos) {
+<span id="H2">            ensureAttrValue(startPos, endPos);</span>
+<span id="H2">            for (int codepoint : appendCodepoints) {</span>
+<span id="H2">                attrValueSb.appendCodePoint(codepoint);</span>
+            }
+<span id="H2">        }</span>
+        
+        final void setEmptyAttributeValue() {
+<span id="H2">            hasEmptyAttrValue = true;</span>
+<span id="H2">        }</span>
+
+        private void ensureAttrName(int startPos, int endPos) {
+<span id="H1">            hasAttrName = true;</span>
+            // if on second hit, we&#x27;ll need to move to the builder
+<span id="H1">            if (attrName != null) {</span>
+<span id="H1">                attrNameSb.append(attrName);</span>
+<span id="H1">                attrName = null;</span>
+            }
+<span id="H1">            if (trackSource) {</span>
+<span id="H2">                attrNameStart = attrNameStart &gt; Unset ? attrNameStart : startPos; // latches to first</span>
+<span id="H2">                attrNameEnd = endPos;</span>
+            }
+<span id="H1">        }</span>
+
+        private void ensureAttrValue(int startPos, int endPos) {
+<span id="H1">            hasAttrValue = true;</span>
+            // if on second hit, we&#x27;ll need to move to the builder
+<span id="H1">            if (attrValue != null) {</span>
+<span id="H1">                attrValueSb.append(attrValue);</span>
+<span id="H1">                attrValue = null;</span>
+            }
+<span id="H1">            if (trackSource) {</span>
+<span id="H2">                attrValStart = attrValStart &gt; Unset ? attrValStart : startPos; // latches to first</span>
+<span id="H2">                attrValEnd = endPos;</span>
+            }
+<span id="H1">        }</span>
+
+        @Override
+        abstract public String toString();
+    }
+
+    final static class StartTag extends Tag {
+
+        // TreeBuilder is provided so if tracking, can get line / column positions for Range; and can dedupe as we go
+        StartTag(TreeBuilder treeBuilder) {
+<span id="H1">            super(TokenType.StartTag, treeBuilder);</span>
+<span id="H1">        }</span>
+
+        @Override
+        Tag reset() {
+<span id="H1">            super.reset();</span>
+<span id="H1">            attributes = null;</span>
+<span id="H1">            return this;</span>
+        }
+
+        StartTag nameAttr(String name, Attributes attributes) {
+<span id="H2">            this.tagName = name;</span>
+<span id="H2">            this.attributes = attributes;</span>
+<span id="H2">            normalName = ParseSettings.normalName(tagName);</span>
+<span id="H2">            return this;</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H2">            String closer = isSelfClosing() ? &quot;/&gt;&quot; : &quot;&gt;&quot;;</span>
+<span id="H2">            if (hasAttributes() &amp;&amp; attributes.size() &gt; 0)</span>
+<span id="H2">                return &quot;&lt;&quot; + toStringName() + &quot; &quot; + attributes.toString() + closer;</span>
+            else
+<span id="H2">                return &quot;&lt;&quot; + toStringName() + closer;</span>
+        }
+    }
+
+    final static class EndTag extends Tag{
+        EndTag(TreeBuilder treeBuilder) {
+<span id="H1">            super(TokenType.EndTag, treeBuilder);</span>
+<span id="H1">        }</span>
+
+        @Override
+        public String toString() {
+<span id="H2">            return &quot;&lt;/&quot; + toStringName() + &quot;&gt;&quot;;</span>
+        }
+    }
+
+    final static class Comment extends Token {
+<span id="H1">        private final StringBuilder data = new StringBuilder();</span>
+        private String dataS; // try to get in one shot
+<span id="H1">        boolean bogus = false;</span>
+
+        @Override
+        Token reset() {
+<span id="H1">            super.reset();</span>
+<span id="H1">            reset(data);</span>
+<span id="H1">            dataS = null;</span>
+<span id="H1">            bogus = false;</span>
+<span id="H1">            return this;</span>
+        }
+
+        Comment() {
+<span id="H1">            super(TokenType.Comment);</span>
+<span id="H1">        }</span>
+
+        String getData() {
+<span id="H1">            return dataS != null ? dataS : data.toString();</span>
+        }
+
+        Comment append(String append) {
+<span id="H1">            ensureData();</span>
+<span id="H1">            if (data.length() == 0) {</span>
+<span id="H1">                dataS = append;</span>
+            } else {
+<span id="H2">                data.append(append);</span>
+            }
+<span id="H1">            return this;</span>
+        }
+
+        Comment append(char append) {
+<span id="H2">            ensureData();</span>
+<span id="H2">            data.append(append);</span>
+<span id="H2">            return this;</span>
+        }
+
+        private void ensureData() {
+            // if on second hit, we&#x27;ll need to move to the builder
+<span id="H1">            if (dataS != null) {</span>
+<span id="H2">                data.append(dataS);</span>
+<span id="H2">                dataS = null;</span>
+            }
+<span id="H1">        }</span>
+
+        @Override
+        public String toString() {
+            return &quot;&lt;!--&quot; + getData() + &quot;--&gt;&quot;;
+        }
+    }
+
+    static class Character extends Token implements Cloneable {
+        private String data;
+
+        Character() {
+<span id="H1">            super(TokenType.Character);</span>
+<span id="H1">        }</span>
+
+        @Override
+        Token reset() {
+<span id="H1">            super.reset();</span>
+<span id="H1">            data = null;</span>
+<span id="H1">            return this;</span>
+        }
+
+        Character data(String data) {
+<span id="H1">            this.data = data;</span>
+<span id="H1">            return this;</span>
+        }
+
+        String getData() {
+<span id="H1">            return data;</span>
+        }
+
+        @Override
+        public String toString() {
+<span id="H2">            return getData();</span>
+        }
+
+        @Override protected Token.Character clone() {
+            try {
+<span id="H2">                return (Token.Character) super.clone();</span>
+            } catch (CloneNotSupportedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    final static class CData extends Character {
+        CData(String data) {
+<span id="H1">            super();</span>
+<span id="H1">            this.data(data);</span>
+<span id="H1">        }</span>
+
+        @Override
+        public String toString() {
+            return &quot;&lt;![CDATA[&quot; + getData() + &quot;]]&gt;&quot;;
+        }
+
+    }
+
+    final static class EOF extends Token {
+        EOF() {
+<span id="H1">            super(Token.TokenType.EOF);</span>
+<span id="H1">        }</span>
+
+        @Override
+        Token reset() {
+            super.reset();
+            return this;
+        }
+
+        @Override
+        public String toString() {
+<span id="H2">            return &quot;&quot;;</span>
+        }
+    }
+
+    final boolean isDoctype() {
+<span id="H1">        return type == TokenType.Doctype;</span>
+    }
+
+    final Doctype asDoctype() {
+<span id="H2">        return (Doctype) this;</span>
+    }
+
+    final boolean isStartTag() {
+<span id="H1">        return type == TokenType.StartTag;</span>
+    }
+
+    final StartTag asStartTag() {
+<span id="H1">        return (StartTag) this;</span>
+    }
+
+    final boolean isEndTag() {
+<span id="H1">        return type == TokenType.EndTag;</span>
+    }
+
+    final EndTag asEndTag() {
+<span id="H1">        return (EndTag) this;</span>
+    }
+
+    final boolean isComment() {
+<span id="H1">        return type == TokenType.Comment;</span>
+    }
+
+    final Comment asComment() {
+<span id="H1">        return (Comment) this;</span>
+    }
+
+    final boolean isCharacter() {
+<span id="H1">        return type == TokenType.Character;</span>
+    }
+
+    final boolean isCData() {
+<span id="H1">        return this instanceof CData;</span>
+    }
+
+    final Character asCharacter() {
+<span id="H1">        return (Character) this;</span>
+    }
+
+    final boolean isEOF() {
+<span id="H1">        return type == TokenType.EOF;</span>
+    }
+
+<span id="H1">    public enum TokenType {</span>
+<span id="H1">        Doctype,</span>
+<span id="H1">        StartTag,</span>
+<span id="H1">        EndTag,</span>
+<span id="H1">        Comment,</span>
+<span id="H1">        Character, // note no CData - treated in builder as an extension of Character</span>
+<span id="H1">        EOF</span>
+    }
+}</pre>
+</div>
+<script src="../../../../../../__resource__/prettify.js"></script>
+</body>
+</html>
